@@ -34,6 +34,7 @@ namespace ArduinoCsCompiler.Runtime
             throw new FormatException("Cannot parse address");
         }
 
+        [ArduinoImplementation]
         public static unsafe bool Ipv4StringToAddress(ReadOnlySpan<char> ipSpan, out long address)
         {
             int index = 0;

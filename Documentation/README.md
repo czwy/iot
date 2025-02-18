@@ -56,7 +56,7 @@ While contributing, you should read the [coding guidelines section](https://gith
 
 ## Development Boards
 
-> **NOTE**: It has been verified that .NET Core will work on the following development boards.  However, there has only been limited testing so far.  It is recommended you experiment with a Raspberry Pi 3+.
+> **NOTE**: It has been verified that .NET Core will work on the following development boards.  However, there has only been limited testing so far.  It is recommended you experiment with the Raspberry Pi 3 and HummingBoard for now.
 
 ### Raspberry Pi
 
@@ -81,6 +81,17 @@ While contributing, you should read the [coding guidelines section](https://gith
 #### Product details for Raspberry Pi
 
 * [Raspberry Pi 3 Model B+](https://www.raspberrypi.org/products/raspberry-pi-3-model-b-plus/)
+
+### HummingBoard
+
+#### General information for HummingBoard
+
+* [SolidRun Website](https://www.solid-run.com/)
+* [SolidRun GitHub Website](https://github.com/SolidRun)
+
+#### Product details for HummingBoard
+
+* [HummingBoard](https://www.solid-run.com/nxp-family/hummingboard/)
 
 ### BeagleBoard
 

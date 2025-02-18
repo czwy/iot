@@ -126,10 +126,5 @@ namespace ArduinoCsCompiler.Runtime
         {
             return input;
         }
-
-        public static string? GetEnvironmentVariableCore_NoArrayPool(string variable)
-        {
-            return null;
-        }
     }
 }

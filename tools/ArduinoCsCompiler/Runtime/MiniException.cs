@@ -32,6 +32,12 @@ namespace ArduinoCsCompiler.Runtime
         {
         }
 
+        [ArduinoImplementation]
+        public string CreateSourceName()
+        {
+            return "Source";
+        }
+
         [ArduinoImplementation(CompareByParameterNames = true)]
         public void RestoreDispatchState(int dispatchState) // Argument is a struct
         {

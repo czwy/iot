@@ -99,7 +99,7 @@ stages:
     jobs:
     - job:
       displayName: NuGet Validation
-      condition: and(succeededOrFailed(), eq( ${{ parameters.enableNugetValidation }}, 'true'))
+      condition: eq( ${{ parameters.enableNugetValidation }}, 'true')
       pool:
         # We don't use the collection uri here because it might vary (.visualstudio.com vs. dev.azure.com)
         ${{ if eq(variables['System.TeamProject'], 'DevDiv') }}:
@@ -177,6 +177,12 @@ stages:
         # otherwise it'll complain about accessing a private feed.
         - task: NuGetAuthenticate@1
           displayName: 'Authenticate to AzDO Feeds'
+        
+        - task: PowerShell@2
+          displayName: Enable cross-org publishing
+          inputs:
+            filePath: eng\common\enable-cross-org-publishing.ps1
+            arguments: -token $(dn-bot-dnceng-artifact-feeds-rw)
 
         # Signing validation will optionally work with the buildmanifest file which is downloaded from
         # Azure DevOps above.
@@ -193,7 +199,6 @@ stages:
           parameters:
             StageLabel: 'Validation'
             JobLabel: 'Signing'
-            BinlogToolVersion: $(BinlogToolVersion)
 
     - job:
       displayName: SourceLink Validation
@@ -261,8 +266,8 @@ stages:
           os: windows
         # If it's not devdiv, it's dnceng
         ${{ else }}:
-          name: NetCore1ESPool-Publishing-Internal
-          image: windows.vs2019.amd64
+          name: $(DncEngInternalBuildPool)
+          image: 1es-windows-2022
           os: windows
       steps:
         - template: setup-maestro-vars.yml
@@ -272,16 +277,14 @@ stages:
 
         - task: NuGetAuthenticate@1
 
-        - task: AzureCLI@2
+        - task: PowerShell@2
           displayName: Publish Using Darc
           inputs:
-            azureSubscription: "Darc: Maestro Production"
-            scriptType: ps
-            scriptLocation: scriptPath
-            scriptPath: $(Build.SourcesDirectory)/eng/common/post-build/publish-using-darc.ps1
+            filePath: $(Build.SourcesDirectory)/eng/common/post-build/publish-using-darc.ps1
             arguments: -BuildId $(BARBuildId) 
               -PublishingInfraVersion ${{ parameters.publishingInfraVersion }}
-              -AzdoToken '$(System.AccessToken)'
+              -AzdoToken '$(publishing-dnceng-devdiv-code-r-build-re)'
+              -MaestroToken '$(MaestroApiAccessToken)'
               -WaitPublishingFinish true
               -ArtifactsPublishingAdditionalParameters '${{ parameters.artifactsPublishingAdditionalParameters }}'
               -SymbolPublishingAdditionalParameters '${{ parameters.symbolPublishingAdditionalParameters }}'

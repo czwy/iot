@@ -145,13 +145,13 @@ namespace ArduinoCsCompiler
         /// </summary>
         public static bool MethodsHaveSameSignature(EquatableMethod a, EquatableMethod b)
         {
-            return MethodsHaveSameSignature(a.Method, b.Method, false);
+            return MethodsHaveSameSignature(a.Method, b.Method);
         }
 
         /// <summary>
         /// The two methods have the same name and signature (that means one can be replaced with another or one can override another)
         /// </summary>
-        public static bool MethodsHaveSameSignature(MethodBase a, MethodBase b, bool allowExplicitImplementation = false)
+        public static bool MethodsHaveSameSignature(MethodBase a, MethodBase b)
         {
             // A ctor can never match an ordinary method or the other way round
             if (a.GetType() != b.GetType())
@@ -164,20 +164,7 @@ namespace ArduinoCsCompiler
                 return false;
             }
 
-            var n1 = a.Name;
-            var n2 = b.Name;
-
-            if (allowExplicitImplementation && n1.Contains(".", StringComparison.Ordinal))
-            {
-                n1 = n1.Substring(n1.LastIndexOf('.') + 1);
-            }
-
-            if (allowExplicitImplementation && n2.Contains(".", StringComparison.Ordinal))
-            {
-                n2 = n2.Substring(n2.LastIndexOf('.') + 1);
-            }
-
-            if (n1 != n2)
+            if (a.Name != b.Name)
             {
                 return false;
             }
@@ -310,11 +297,10 @@ namespace ArduinoCsCompiler
         public static bool IsOverriddenImplementation(EquatableMethod candidate, EquatableMethod self, bool candidateIsFromInterface)
         {
             var interf = candidate.DeclaringType;
-            if (interf != null && interf.IsInterface && self.DeclaringType != null && self.DeclaringType.IsArray == false && !self.DeclaringType.IsInterface)
+            if (interf != null && interf.IsInterface && self.DeclaringType != null && self.DeclaringType.IsArray == false)
             {
                 // The interface map can be used to check whether a method (self) implements a method from an interface. For this
-                // the names need not match (and will eventually not, if the method is implemented explicitly).
-                // Note that self cannot be an interface in itself.
+                // the names need not match (and will eventually not, if the method is implemented explicitly)
                 var map = self.DeclaringType.GetInterfaceMap(interf);
                 for (int i = 0; i < map.InterfaceMethods.Length; i++)
                 {
@@ -346,6 +332,7 @@ namespace ArduinoCsCompiler
             }
 
             // private methods cannot be virtual
+            // TODO: Check how explicitly interface implementations are handled in IL
             if (self.IsPrivate || candidate.IsPrivate)
             {
                 return false;
@@ -419,16 +406,16 @@ namespace ArduinoCsCompiler
         /// Returns true if the two methods denote the same operator.
         /// We need to handle this a bit special because it is not possible to declare i.e. operator==(Type a, Type b) outside "Type" if we want to replace it.
         /// </summary>
-        public static bool AreSameOperatorMethods(EquatableMethod a, EquatableMethod b, bool allowExplicitImplementations)
+        public static bool AreSameOperatorMethods(EquatableMethod a, EquatableMethod b)
         {
-            return AreSameOperatorMethods(a.Method, b.Method, allowExplicitImplementations);
+            return AreSameOperatorMethods(a.Method, b.Method);
         }
 
         /// <summary>
         /// Returns true if the two methods denote the same operator.
         /// We need to handle this a bit special because it is not possible to declare i.e. operator==(Type a, Type b) outside "Type" if we want to replace it.
         /// </summary>
-        public static bool AreSameOperatorMethods(MethodBase a, MethodBase b, bool allowExplicitImplementation)
+        public static bool AreSameOperatorMethods(MethodBase a, MethodBase b)
         {
             // A ctor can never match an ordinary method or the other way round
             if (a.GetType() != b.GetType())
@@ -436,20 +423,7 @@ namespace ArduinoCsCompiler
                 return false;
             }
 
-            var n1 = a.Name;
-            var n2 = b.Name;
-
-            if (allowExplicitImplementation && n1.Contains(".", StringComparison.Ordinal))
-            {
-                n1 = n1.Substring(n1.LastIndexOf('.') + 1);
-            }
-
-            if (allowExplicitImplementation && n2.Contains(".", StringComparison.Ordinal))
-            {
-                n2 = n2.Substring(n2.LastIndexOf('.') + 1);
-            }
-
-            if (n1 != n2)
+            if (a.Name != b.Name)
             {
                 return false;
             }
@@ -470,7 +444,7 @@ namespace ArduinoCsCompiler
             // Same name and named "op_*". These are both operators, so we decide they're equal.
             // Note that this is not necessarily true, because it is possible to define two op_equality members with different argument sets,
             // but this is very discouraged and is hopefully not the case in the System libs.
-            if (n1.StartsWith("op_"))
+            if (a.Name.StartsWith("op_"))
             {
                 return true;
             }

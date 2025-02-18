@@ -33,11 +33,6 @@ namespace ArduinoCsCompiler.Runtime
             return path.Length > 0 && IsDirectorySeparator(path[0]) ? 1 : 0;
         }
 
-        internal static bool IsDevice(System.ReadOnlySpan<System.Char> path)
-        {
-            throw new NotImplementedException();
-        }
-
         internal static bool IsDirectorySeparator(char c)
         {
             // The alternate directory separator char is the same as the directory separator,

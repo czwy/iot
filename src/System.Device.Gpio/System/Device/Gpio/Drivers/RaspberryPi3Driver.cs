@@ -151,7 +151,11 @@ public class RaspberryPi3Driver : GpioDriver
     [MethodImpl(MethodImplOptions.NoInlining)]
     private static GpioDriver CreateWindows10GpioDriver()
     {
-        throw new PlatformNotSupportedException();
+        // This wrapper is needed to prevent Mono from loading Windows10Driver
+        // which causes all fields to be loaded - one of such fields is WinRT type which does not
+        // exist on Linux which causes TypeLoadException.
+        // Using NoInlining and no explicit type prevents this from happening.
+        return new Windows10Driver();
     }
 
     private GpioDriver InternalDriver

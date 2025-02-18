@@ -60,9 +60,10 @@ jobs:
       os: windows
     # If it's not devdiv, it's dnceng
     ${{ if ne(variables['System.TeamProject'], 'DevDiv') }}:
-      name: NetCore1ESPool-Publishing-Internal
-      image: windows.vs2019.amd64
+      name: $(DncEngInternalBuildPool)
+      image: 1es-windows-2022
       os: windows
+
   steps:
   - ${{ if and(eq(parameters.runAsPublic, 'false'), ne(variables['System.TeamProject'], 'public'), notin(variables['Build.Reason'], 'PullRequest')) }}:
     - task: DownloadBuildArtifacts@0
@@ -76,17 +77,20 @@ jobs:
     
     - task: NuGetAuthenticate@1
 
-    - task: AzureCLI@2
+    - task: PowerShell@2 
+      displayName: Enable cross-org NuGet feed authentication 
+      inputs: 
+        filePath: $(Build.SourcesDirectory)/eng/common/enable-cross-org-publishing.ps1 
+        arguments: -token $(dn-bot-all-orgs-artifact-feeds-rw) 
+
+    - task: PowerShell@2
       displayName: Publish Build Assets
       inputs:
-        azureSubscription: "Darc: Maestro Production"
-        scriptType: ps
-        scriptLocation: scriptPath
-        scriptPath: $(Build.SourcesDirectory)/eng/common/sdk-task.ps1
-        arguments: >
-          -task PublishBuildAssets -restore -msbuildEngine dotnet
+        filePath: eng\common\sdk-task.ps1
+        arguments: -task PublishBuildAssets -restore -msbuildEngine dotnet
           /p:ManifestsPath='$(Build.StagingDirectory)/Download/AssetManifests'
-          /p:MaestroApiEndpoint=https://maestro-prod.westus2.cloudapp.azure.com
+          /p:BuildAssetRegistryToken=$(MaestroAccessToken)
+          /p:MaestroApiEndpoint=https://maestro.dot.net
           /p:PublishUsingPipelines=${{ parameters.publishUsingPipelines }}
           /p:OfficialBuildId=$(Build.BuildNumber)
       condition: ${{ parameters.condition }}
@@ -140,16 +144,14 @@ jobs:
           BARBuildId: ${{ parameters.BARBuildId }}
           PromoteToChannelIds: ${{ parameters.PromoteToChannelIds }}
 
-      - task: AzureCLI@2
+      - task: PowerShell@2
         displayName: Publish Using Darc
         inputs:
-          azureSubscription: "Darc: Maestro Production"
-          scriptType: ps
-          scriptLocation: scriptPath
-          scriptPath: $(Build.SourcesDirectory)/eng/common/post-build/publish-using-darc.ps1
-          arguments: -BuildId $(BARBuildId)
+          filePath: $(Build.SourcesDirectory)/eng/common/post-build/publish-using-darc.ps1
+          arguments: -BuildId $(BARBuildId) 
             -PublishingInfraVersion 3
-            -AzdoToken '$(System.AccessToken)'
+            -AzdoToken '$(publishing-dnceng-devdiv-code-r-build-re)'
+            -MaestroToken '$(MaestroApiAccessToken)'
             -WaitPublishingFinish true
             -ArtifactsPublishingAdditionalParameters '${{ parameters.artifactsPublishingAdditionalParameters }}'
             -SymbolPublishingAdditionalParameters '${{ parameters.symbolPublishingAdditionalParameters }}'
@@ -157,4 +159,4 @@ jobs:
     - ${{ if eq(parameters.enablePublishBuildArtifacts, 'true') }}:
       - template: /eng/common/templates-official/steps/publish-logs.yml
         parameters:
-          JobLabel: 'Publish_Artifacts_Logs'     
+          JobLabel: 'Publish_Artifacts_Logs'

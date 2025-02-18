@@ -26,6 +26,9 @@ public class GpioController : IDisposable
     private const string RaspberryPi3Product = "Raspberry Pi 3";
     private const string RaspberryPi5Product = "Raspberry Pi 5";
 
+    private const string HummingBoardProduct = "HummingBoard-Edge";
+    private const string HummingBoardHardware = @"Freescale i.MX6 Quad/DualLite (Device Tree)";
+
     /// <summary>
     /// If a pin element exists, that pin is open. Uses current controller's numbering scheme
     /// </summary>
@@ -139,7 +142,7 @@ public class GpioController : IDisposable
 
         OpenPinCore(pinNumber);
         _openPins.TryAdd(pinNumber, null);
-        _gpioPins[pinNumber] = new GpioPin(pinNumber, this);
+        _gpioPins[pinNumber] = new GpioPin(pinNumber, _driver);
         return _gpioPins[pinNumber];
     }
 
@@ -258,7 +261,7 @@ public class GpioController : IDisposable
     /// </summary>
     /// <param name="pinNumber">The pin number in the controller's numbering scheme.</param>
     /// <returns>The status if the pin is open or closed.</returns>
-    public virtual bool IsPinOpen(int pinNumber)
+    public bool IsPinOpen(int pinNumber)
     {
         CheckDriverValid();
         return _openPins.ContainsKey(pinNumber);
@@ -569,8 +572,13 @@ public class GpioController : IDisposable
             return new RaspberryPi3Driver();
         }
 
+        if (baseBoardProduct == HummingBoardProduct || baseBoardProduct.StartsWith($"{HummingBoardProduct} "))
+        {
+            return new HummingBoardDriver();
+        }
+
         // Default for Windows IoT Core on a non-specific device
-        throw new PlatformNotSupportedException();
+        return new Windows10Driver();
     }
 
     /// <summary>

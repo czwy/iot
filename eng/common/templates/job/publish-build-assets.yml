@@ -58,7 +58,7 @@ jobs:
       demands: Cmd
     # If it's not devdiv, it's dnceng
     ${{ if ne(variables['System.TeamProject'], 'DevDiv') }}:
-      name: NetCore1ESPool-Publishing-Internal
+      name: $(DncEngInternalBuildPool)
       demands: ImageOverride -equals windows.vs2019.amd64
 
   steps:
@@ -71,25 +71,28 @@ jobs:
         checkDownloadedFiles: true
       condition: ${{ parameters.condition }}
       continueOnError: ${{ parameters.continueOnError }}
-
+    
     - task: NuGetAuthenticate@1
 
-    - task: AzureCLI@2
+    - task: PowerShell@2 
+      displayName: Enable cross-org NuGet feed authentication 
+      inputs: 
+        filePath: $(Build.SourcesDirectory)/eng/common/enable-cross-org-publishing.ps1 
+        arguments: -token $(dn-bot-all-orgs-artifact-feeds-rw) 
+
+    - task: PowerShell@2
       displayName: Publish Build Assets
       inputs:
-        azureSubscription: "Darc: Maestro Production"
-        scriptType: ps
-        scriptLocation: scriptPath
-        scriptPath: $(Build.SourcesDirectory)/eng/common/sdk-task.ps1
-        arguments: >
-          -task PublishBuildAssets -restore -msbuildEngine dotnet
+        filePath: eng\common\sdk-task.ps1
+        arguments: -task PublishBuildAssets -restore -msbuildEngine dotnet
           /p:ManifestsPath='$(Build.StagingDirectory)/Download/AssetManifests'
+          /p:BuildAssetRegistryToken=$(MaestroAccessToken)
           /p:MaestroApiEndpoint=https://maestro.dot.net
           /p:PublishUsingPipelines=${{ parameters.publishUsingPipelines }}
           /p:OfficialBuildId=$(Build.BuildNumber)
       condition: ${{ parameters.condition }}
       continueOnError: ${{ parameters.continueOnError }}
-
+    
     - task: powershell@2
       displayName: Create ReleaseConfigs Artifact
       inputs:
@@ -98,7 +101,7 @@ jobs:
           Add-Content -Path "$(Build.StagingDirectory)/ReleaseConfigs.txt" -Value $(BARBuildId)
           Add-Content -Path "$(Build.StagingDirectory)/ReleaseConfigs.txt" -Value "$(DefaultChannels)"
           Add-Content -Path "$(Build.StagingDirectory)/ReleaseConfigs.txt" -Value $(IsStableBuild)
-
+    
     - task: PublishBuildArtifacts@1
       displayName: Publish ReleaseConfigs Artifact
       inputs:
@@ -124,7 +127,7 @@ jobs:
 
     - task: PublishBuildArtifacts@1
       displayName: Publish SymbolPublishingExclusionsFile Artifact
-      condition: eq(variables['SymbolExclusionFile'], 'true')
+      condition: eq(variables['SymbolExclusionFile'], 'true') 
       inputs:
         PathtoPublish: '$(Build.SourcesDirectory)/eng/SymbolPublishingExclusionsFile.txt'
         PublishLocation: Container
@@ -136,16 +139,14 @@ jobs:
           BARBuildId: ${{ parameters.BARBuildId }}
           PromoteToChannelIds: ${{ parameters.PromoteToChannelIds }}
 
-      - task: AzureCLI@2
+      - task: PowerShell@2
         displayName: Publish Using Darc
         inputs:
-          azureSubscription: "Darc: Maestro Production"
-          scriptType: ps
-          scriptLocation: scriptPath
-          scriptPath: $(Build.SourcesDirectory)/eng/common/post-build/publish-using-darc.ps1
+          filePath: $(Build.SourcesDirectory)/eng/common/post-build/publish-using-darc.ps1
           arguments: -BuildId $(BARBuildId) 
             -PublishingInfraVersion 3
-            -AzdoToken '$(System.AccessToken)'
+            -AzdoToken '$(publishing-dnceng-devdiv-code-r-build-re)'
+            -MaestroToken '$(MaestroApiAccessToken)'
             -WaitPublishingFinish true
             -ArtifactsPublishingAdditionalParameters '${{ parameters.artifactsPublishingAdditionalParameters }}'
             -SymbolPublishingAdditionalParameters '${{ parameters.symbolPublishingAdditionalParameters }}'
@@ -153,4 +154,4 @@ jobs:
     - ${{ if eq(parameters.enablePublishBuildArtifacts, 'true') }}:
       - template: /eng/common/templates/steps/publish-logs.yml
         parameters:
-          JobLabel: 'Publish_Artifacts_Logs'
+          JobLabel: 'Publish_Artifacts_Logs'     

@@ -29,11 +29,6 @@ namespace ArduinoCsCompiler
         private const int DataVersion = 2;
 
         /// <summary>
-        /// Protocol version 0 is the version used with Iot.Device.Bindings v. 3.x
-        /// </summary>
-        public const int ProtocolVersion = 1;
-
-        /// <summary>
         /// The list of system assemblies (these may contain kernel interop calls)
         /// The list contains the name and a public type within that assembly.
         /// All of these assemblies contain a class named Interop+Kernel32. We want to replace them all, and
@@ -44,6 +39,7 @@ namespace ArduinoCsCompiler
             // "System.Private.Corelib.dll",
             ("System.Console", typeof(System.Console)),
             ("System.Diagnostics.Process", typeof(System.Diagnostics.Process)),
+            ("Microsoft.Win32.Primitives", typeof(Win32Exception)),
             // ("System.Net.Primitives", typeof(System.Net.IPAddress)),
             // ("System.Private.Uri", typeof(System.Uri)),
         };
@@ -288,31 +284,25 @@ namespace ArduinoCsCompiler
                 throw new ObjectDisposedException(nameof(MicroCompiler));
             }
 
-            var stack = new AnalysisStack();
-
             void AddMethod(EquatableMethod method, int nativeMethod)
             {
-                stack.Push(method);
-                if (!set.HasMethod(method, stack, out _, out _))
+                if (!set.HasMethod(method, method, out _, out _))
                 {
                     set.GetReplacement(method.DeclaringType);
-                    var replacement = set.GetReplacement(method, stack);
+                    var replacement = set.GetReplacement(method, method);
                     if (replacement != null)
                     {
                         method = replacement;
-                        if (set.HasMethod(method, stack, out _, out _))
+                        if (set.HasMethod(method, method, out _, out _))
                         {
-                            stack.Pop();
                             return;
                         }
                     }
 
-                    int token = set.GetOrAddMethodToken(method, stack);
-                    ArduinoMethodDeclaration decl = new ArduinoMethodDeclaration(token, method, stack, MethodFlags.SpecialMethod, nativeMethod);
+                    int token = set.GetOrAddMethodToken(method, method);
+                    ArduinoMethodDeclaration decl = new ArduinoMethodDeclaration(token, method, null, MethodFlags.SpecialMethod, nativeMethod);
                     set.AddMethod(decl);
                 }
-
-                stack.Pop();
             }
 
             Type lowLevelInterface = typeof(ArduinoHardwareLevelAccess);
@@ -336,7 +326,7 @@ namespace ArduinoCsCompiler
 
                 if (ia.ReplaceEntireType)
                 {
-                    PrepareClass(set, replacement, stack);
+                    PrepareClass(set, replacement);
                     set.AddReplacementType(ia.TypeToReplace, replacement, ia.IncludingSubclasses, ia.IncludingPrivates);
                     if (ia.TypeToReplace.FullName == "Interop+Kernel32")
                     {
@@ -372,7 +362,7 @@ namespace ArduinoCsCompiler
                                 flags |= BindingFlags.NonPublic;
                             }
 
-                            methodToReplace = ia.TypeToReplace!.GetMethods(flags).SingleOrDefault(x => EquatableMethod.MethodsHaveSameSignature(x, m, false) || EquatableMethod.AreSameOperatorMethods(x, m, false));
+                            methodToReplace = ia.TypeToReplace!.GetMethods(flags).SingleOrDefault(x => EquatableMethod.MethodsHaveSameSignature(x, m) || EquatableMethod.AreSameOperatorMethods(x, m));
                             if (methodToReplace == null)
                             {
                                 // if the method is not explicitly marked as InternalCall this is an error
@@ -410,11 +400,11 @@ namespace ArduinoCsCompiler
                                 flags |= BindingFlags.NonPublic;
                             }
 
-                            var ctor = ia.TypeToReplace!.GetConstructors(flags).SingleOrDefault(x => EquatableMethod.MethodsHaveSameSignature(x, m) || EquatableMethod.AreSameOperatorMethods(x, m, false));
+                            var ctor = ia.TypeToReplace!.GetConstructors(flags).SingleOrDefault(x => EquatableMethod.MethodsHaveSameSignature(x, m) || EquatableMethod.AreSameOperatorMethods(x, m));
                             if (ctor == null)
                             {
                                 // That may be ok if it is our own internal implementation, but for now we abort, since we currently have no such case
-                                throw new InvalidOperationException($"A replacement ctor has nothing to replace: {m.MethodSignature()}");
+                                throw new InvalidOperationException($"A replacement method has nothing to replace: {m.MethodSignature()}");
                             }
                             else
                             {
@@ -437,28 +427,28 @@ namespace ArduinoCsCompiler
 
             // Some classes are dynamically created in the runtime - we need them anyway
             HashSet<object> hb = new HashSet<object>();
-            PrepareClass(set, hb.Comparer.GetType(), stack); // The actual instance here is ObjectEqualityComparer<object>
+            PrepareClass(set, hb.Comparer.GetType()); // The actual instance here is ObjectEqualityComparer<object>
 
-            PrepareClass(set, typeof(IEquatable<object>), stack);
+            PrepareClass(set, typeof(IEquatable<object>));
 
             // PrepareClass(set, typeof(System.Span<Int32>));
             HashSet<string> hs = new HashSet<string>();
-            PrepareClass(set, hs.Comparer.GetType(), stack); // GenericEqualityComparer<string>
+            PrepareClass(set, hs.Comparer.GetType()); // GenericEqualityComparer<string>
             HashSet<int> hi = new HashSet<int>();
-            PrepareClass(set, hi.Comparer.GetType(), stack); // GenericEqualityComparer<int>
-            PrepareClass(set, typeof(IEquatable<Nullable<int>>), stack);
+            PrepareClass(set, hi.Comparer.GetType()); // GenericEqualityComparer<int>
+            PrepareClass(set, typeof(IEquatable<Nullable<int>>));
 
             var comparerOfString = Comparer<string>.Default;
-            PrepareClass(set, comparerOfString.GetType(), stack);
+            PrepareClass(set, comparerOfString.GetType());
 
-            PrepareClass(set, typeof(System.Array), stack);
+            PrepareClass(set, typeof(System.Array));
 
-            PrepareClass(set, typeof(System.Object), stack);
-            PrepareClass(set, typeof(System.IComparable<object>), stack);
+            PrepareClass(set, typeof(System.Object));
+            PrepareClass(set, typeof(System.IComparable<object>));
 
             // These are referenced by the system
-            PrepareClass(set, typeof(System.Exception), stack);
-            PrepareClass(set, typeof(System.DivideByZeroException), stack);
+            PrepareClass(set, typeof(System.Exception));
+            PrepareClass(set, typeof(System.DivideByZeroException));
 
             // We'll always need to provide these methods, or we'll get into trouble because they're not explicitly used before anything that depends on
             // them in the runtime
@@ -478,7 +468,7 @@ namespace ArduinoCsCompiler
             }
         }
 
-        internal void PrepareClass(ExecutionSet set, Type classType, AnalysisStack stack)
+        internal void PrepareClass(ExecutionSet set, Type classType)
         {
             if (_disposed)
             {
@@ -488,15 +478,15 @@ namespace ArduinoCsCompiler
             HashSet<Type> baseTypes = new HashSet<Type>();
 
             baseTypes.Add(classType);
-            DetermineBaseAndMembers(baseTypes, classType, stack);
+            DetermineBaseAndMembers(baseTypes, classType);
 
             foreach (var cls in baseTypes)
             {
-                PrepareClassDeclaration(set, cls, stack);
+                PrepareClassDeclaration(set, cls);
             }
         }
 
-        private void PrepareClassDeclaration(ExecutionSet set, Type classType, AnalysisStack stack)
+        private void PrepareClassDeclaration(ExecutionSet set, Type classType)
         {
             if (set.HasDefinition(classType))
             {
@@ -549,21 +539,6 @@ namespace ArduinoCsCompiler
                     if (x.Name == "_methodPtr")
                     {
                         return 2;
-                    }
-
-                    return 10;
-                }).ToList();
-            }
-
-            if (classType == typeof(ArduinoNativeI2cDevice))
-            {
-                // Sorting of fields required
-                fields = fields.OrderBy(x =>
-                {
-                    // This field must be the first (used in runtime)
-                    if (x.Name == "_deviceAddress")
-                    {
-                        return 0;
                     }
 
                     return 10;
@@ -631,10 +606,7 @@ namespace ArduinoCsCompiler
                 var m = methods[index] as ConstructorInfo;
                 if (m != null)
                 {
-                    var mbx = new EquatableMethod(m);
-                    stack.Push(mbx);
-                    memberTypes.Add(new ClassMember(m, VariableKind.Method, set.GetOrAddMethodToken(mbx, stack), new List<int>()));
-                    stack.Pop();
+                    memberTypes.Add(new ClassMember(m, VariableKind.Method, set.GetOrAddMethodToken(m, m), new List<int>()));
                 }
             }
 
@@ -649,10 +621,10 @@ namespace ArduinoCsCompiler
             set.AddClass(newClass);
             foreach (var iface in interfaces)
             {
-                PrepareClassDeclaration(set, iface, stack);
+                PrepareClassDeclaration(set, iface);
             }
 
-            FindDependentClasses(set, classType, stack);
+            FindDependentClasses(set, classType);
         }
 
         /// <summary>
@@ -661,8 +633,7 @@ namespace ArduinoCsCompiler
         /// </summary>
         /// <param name="set">The execution set</param>
         /// <param name="classType">The class that's being observed</param>
-        /// <param name="stack">Analyzer stack</param>
-        private void FindDependentClasses(ExecutionSet set, Type classType, AnalysisStack stack)
+        private void FindDependentClasses(ExecutionSet set, Type classType)
         {
             if (classType.IsConstructedGenericType)
             {
@@ -675,19 +646,19 @@ namespace ArduinoCsCompiler
                     // The logic here can be refined by reversing the logic in ComparerHelpers.CreateDefaultEqualityComparer
                     var typeArgs = classType.GetGenericArguments();
                     var requiredInterface = typeof(IEquatable<>).MakeGenericType(typeArgs);
-                    PrepareClassDeclaration(set, requiredInterface, stack);
+                    PrepareClassDeclaration(set, requiredInterface);
                     if (!typeArgs[0].IsValueType)
                     {
                         // If the class type implements IEquatable<T>, we need the GenericEqualityComparer, otherwise the ObjectEqualityComparer
                         if (typeArgs[0].IsAssignableTo(requiredInterface))
                         {
                             var alsoRequired = GetSystemPrivateType("System.Collections.Generic.GenericEqualityComparer`1")!.MakeGenericType(typeArgs);
-                            PrepareClassDeclaration(set, alsoRequired, stack);
+                            PrepareClassDeclaration(set, alsoRequired);
                         }
                         else
                         {
                             var alsoRequired = GetSystemPrivateType("System.Collections.Generic.ObjectEqualityComparer`1")!.MakeGenericType(typeArgs);
-                            PrepareClassDeclaration(set, alsoRequired, stack);
+                            PrepareClassDeclaration(set, alsoRequired);
                         }
                     }
                     else if (typeArgs[0].IsGenericType && typeArgs[0].GetGenericTypeDefinition() == typeof(Nullable<>))
@@ -696,24 +667,24 @@ namespace ArduinoCsCompiler
                         if (embeddedType.IsEnum)
                         {
                             var alsoRequired = GetSystemPrivateType("System.Collections.Generic.EnumEqualityComparer`1")!.MakeGenericType(embeddedType);
-                            PrepareClassDeclaration(set, alsoRequired, stack);
+                            PrepareClassDeclaration(set, alsoRequired);
                         }
                         else
                         {
                             // This doesn't work with enums
                             var alsoRequired = GetSystemPrivateType("System.Collections.Generic.NullableEqualityComparer`1")!.MakeGenericType(embeddedType);
-                            PrepareClassDeclaration(set, alsoRequired, stack);
+                            PrepareClassDeclaration(set, alsoRequired);
                             // Also need ObjectEqualityComparer<Nullable<T>>
                             var nullableOfT = typeof(Nullable<>).MakeGenericType(embeddedType);
                             alsoRequired = GetSystemPrivateType("System.Collections.Generic.ObjectEqualityComparer`1")!.MakeGenericType(nullableOfT);
-                            PrepareClassDeclaration(set, alsoRequired, stack);
+                            PrepareClassDeclaration(set, alsoRequired);
                         }
                     }
                     else if (!typeArgs[0].IsAssignableTo(requiredInterface))
                     {
                         // If the value type being declared does not implement IEquatable<OfItself> we need an ObjectEqualityComparer<T> instead
                         var alsoRequired = GetSystemPrivateType("System.Collections.Generic.ObjectEqualityComparer`1")!.MakeGenericType(typeArgs);
-                        PrepareClassDeclaration(set, alsoRequired, stack);
+                        PrepareClassDeclaration(set, alsoRequired);
                     }
                     else if (typeArgs[0].IsValueType)
                     {
@@ -721,9 +692,9 @@ namespace ArduinoCsCompiler
                         {
                             // This throws if the given types violate a constraint for the comparer
                             var alsoRequired = GetSystemPrivateType("System.Collections.Generic.GenericEqualityComparer`1")!.MakeGenericType(typeArgs);
-                            PrepareClassDeclaration(set, alsoRequired, stack);
+                            PrepareClassDeclaration(set, alsoRequired);
                             alsoRequired = GetSystemPrivateType("System.Collections.Generic.GenericComparer`1")!.MakeGenericType(typeArgs);
-                            PrepareClassDeclaration(set, alsoRequired, stack);
+                            PrepareClassDeclaration(set, alsoRequired);
                         }
                         catch (ArgumentException x)
                         {
@@ -736,22 +707,22 @@ namespace ArduinoCsCompiler
                 {
                     var typeArgs = classType.GetGenericArguments();
                     var requiredInterface = typeof(IComparable<>).MakeGenericType(typeArgs);
-                    PrepareClassDeclaration(set, requiredInterface, stack);
+                    PrepareClassDeclaration(set, requiredInterface);
                     var alsoRequired = GetSystemPrivateType("System.Collections.Generic.ObjectComparer`1")!.MakeGenericType(typeArgs);
-                    PrepareClassDeclaration(set, alsoRequired, stack);
+                    PrepareClassDeclaration(set, alsoRequired);
                 }
 
                 if (openType == typeof(Nullable<>))
                 {
                     var alsoRequired = GetSystemPrivateType("System.Collections.Generic.ObjectEqualityComparer`1")!.MakeGenericType(classType);
-                    PrepareClassDeclaration(set, alsoRequired, stack);
+                    PrepareClassDeclaration(set, alsoRequired);
                 }
 
                 if (openType == _arraySortHelper)
                 {
                     var typeArgs = classType.GetGenericArguments();
                     var alsoRequired = GetSystemPrivateType("System.Collections.Generic.GenericArraySortHelper`1")!.MakeGenericType(typeArgs);
-                    PrepareClassDeclaration(set, alsoRequired, stack);
+                    PrepareClassDeclaration(set, alsoRequired);
                 }
             }
         }
@@ -763,7 +734,7 @@ namespace ArduinoCsCompiler
                 int staticFieldSize = 0;
                 var field = fields[index];
                 // For static fields, the minimum size is 4, so exact alignment is not necessary
-                var fieldType = GetVariableType(field.Name, field.FieldType, StructAlignmentMinRequirement(classType, fields), out var size);
+                var fieldType = GetVariableType(field.FieldType, StructAlignmentMinRequirement(classType, fields), out var size);
                 if (field.IsStatic)
                 {
                     fieldType |= VariableKind.StaticMember;
@@ -898,7 +869,7 @@ namespace ArduinoCsCompiler
                     }
                 }
 
-                var newvar = new ClassMember(field, fieldType, token, size, staticFieldSize);
+                var newvar = new ClassMember(field, fieldType, token, size, -1, staticFieldSize);
                 memberTypes.Add(newvar);
             }
         }
@@ -1017,7 +988,7 @@ namespace ArduinoCsCompiler
                     // Add all virtual members (the others are not assigned to classes in our metadata)
                     if (m.IsConstructor || m.IsVirtual || m.IsAbstract)
                     {
-                        PrepareMethod(set, m, new AnalysisStack(m));
+                        PrepareMethod(set, m, null);
                     }
                     else
                     {
@@ -1026,7 +997,7 @@ namespace ArduinoCsCompiler
                         CollectBaseImplementations(set, m, methodsBeingImplemented);
                         if (methodsBeingImplemented.Any())
                         {
-                            PrepareMethod(set, m, new AnalysisStack(m));
+                            PrepareMethod(set, m, null);
                         }
                     }
                 }
@@ -1034,7 +1005,7 @@ namespace ArduinoCsCompiler
                 foreach (var m in c.TheType.GetConstructors(BindingFlags.Public | BindingFlags.Instance))
                 {
                     // Add all ctors
-                    PrepareMethod(set, m, new AnalysisStack(m));
+                    PrepareMethod(set, m, null);
                 }
             }
         }
@@ -1043,10 +1014,8 @@ namespace ArduinoCsCompiler
         /// Complete the execution set by making sure all dependencies are resolved
         /// </summary>
         /// <param name="set">The <see cref="ExecutionSet"/> to complete</param>
-        /// <param name="settings">Compiler settings</param>
-        /// <param name="stack">Stack for debugging the static analyzer</param>
         /// <param name="forKernel">True if a kernel shall be compiled (requires class completion, so the kernel classes can be finalized)</param>
-        internal void FinalizeExecutionSet(ExecutionSet set, CompilerSettings settings, AnalysisStack stack, bool forKernel)
+        internal void FinalizeExecutionSet(ExecutionSet set, bool forKernel)
         {
             if (_disposed)
             {
@@ -1061,53 +1030,50 @@ namespace ArduinoCsCompiler
             }
 
             // Because the code below is still not water proof (there could have been virtual methods added only in the end), we do this twice
-            if (!settings.SkipIterativeCompletion)
+            for (int i = 0; i < 2; i++)
             {
-                for (int i = 0; i < 2; i++)
+                AddCallbackMethods(set);
+                // Contains all classes traversed so far
+                List<ClassDeclaration> declarations = new List<ClassDeclaration>(set.Classes);
+                // Contains the new ones to be traversed this time (start with all)
+                List<ClassDeclaration> newDeclarations = new List<ClassDeclaration>(declarations);
+                while (true)
                 {
-                    AddCallbackMethods(set);
-                    // Contains all classes traversed so far
-                    List<ClassDeclaration> declarations = new List<ClassDeclaration>(set.Classes);
-                    // Contains the new ones to be traversed this time (start with all)
-                    List<ClassDeclaration> newDeclarations = new List<ClassDeclaration>(declarations);
-                    while (true)
+                    // Sort: Interfaces first, then bases before their derived types (so that if a base rewires one virtual method to another - possibly abstract -
+                    // method, the derived method's actual implementation is linked. I.e. IEqualityComparer.Equals(object,object) -> EqualityComparer.Equals(object, object) ->
+                    // EqualityComparer<T>.Equals(T,T) -> -> GenericEqualityComparer<T>.Equals(T,T)
+                    newDeclarations.Sort(new ClassDeclarationByInheritanceSorter());
+                    DetectRequiredVirtualMethodImplementations(set, newDeclarations);
+
+                    // Of all classes in the list, load their static cctors. This may also add new classes in turn
+                    for (var j = 0; j < set.Classes.Count; j++)
                     {
-                        // Sort: Interfaces first, then bases before their derived types (so that if a base rewires one virtual method to another - possibly abstract -
-                        // method, the derived method's actual implementation is linked. I.e. IEqualityComparer.Equals(object,object) -> EqualityComparer.Equals(object, object) ->
-                        // EqualityComparer<T>.Equals(T,T) -> -> GenericEqualityComparer<T>.Equals(T,T)
-                        newDeclarations.Sort(new ClassDeclarationByInheritanceSorter());
-                        DetectRequiredVirtualMethodImplementations(set, newDeclarations, stack);
-
-                        // Of all classes in the list, load their static cctors. This may also add new classes in turn
-                        for (var j = 0; j < set.Classes.Count; j++)
+                        var cls = set.Classes[j];
+                        var cctor = cls.TheType.TypeInitializer;
+                        if (cctor == null || cls.SuppressInit)
                         {
-                            var cls = set.Classes[j];
-                            var cctor = cls.TheType.TypeInitializer;
-                            if (cctor == null || cls.SuppressInit)
-                            {
-                                continue;
-                            }
-
-                            PrepareMethod(set, cctor, new AnalysisStack(cctor));
+                            continue;
                         }
 
-                        if (set.Classes.Count == declarations.Count)
-                        {
-                            break;
-                        }
-
-                        // Find the new ones
-                        newDeclarations = new List<ClassDeclaration>();
-                        foreach (var decl in set.Classes)
-                        {
-                            if (!declarations.Contains(decl))
-                            {
-                                newDeclarations.Add(decl);
-                            }
-                        }
-
-                        declarations = new List<ClassDeclaration>(set.Classes);
+                        PrepareMethod(set, cctor, null);
                     }
+
+                    if (set.Classes.Count == declarations.Count)
+                    {
+                        break;
+                    }
+
+                    // Find the new ones
+                    newDeclarations = new List<ClassDeclaration>();
+                    foreach (var decl in set.Classes)
+                    {
+                        if (!declarations.Contains(decl))
+                        {
+                            newDeclarations.Add(decl);
+                        }
+                    }
+
+                    declarations = new List<ClassDeclaration>(set.Classes);
                 }
             }
 
@@ -1157,8 +1123,8 @@ namespace ArduinoCsCompiler
                 {
                     Type t = typeof(ArduinoNativeHelpers);
                     var method = t.GetMethod("MainStub", BindingFlags.Static | BindingFlags.NonPublic)!;
-                    PrepareMethod(set, method, new AnalysisStack(method));
-                    int tokenOfStartupMethod = set.GetOrAddMethodToken(method, stack);
+                    PrepareMethod(set, method, null);
+                    int tokenOfStartupMethod = set.GetOrAddMethodToken(method, method);
                     set.TokenOfStartupMethod = tokenOfStartupMethod;
                 }
 
@@ -1175,7 +1141,7 @@ namespace ArduinoCsCompiler
         /// <exception cref="NotSupportedException">An error occurred finding a required method</exception>
         private void AddCallbackMethods(ExecutionSet set)
         {
-            if (set.Methods().Values.Any(x => x.MethodBase.DeclaringType == typeof(Thread) && x.MethodBase.Name == "Start"))
+            if (set.Methods().Any(x => x.MethodBase.DeclaringType == typeof(Thread) && x.MethodBase.Name == "Start"))
             {
                 // We get here if Thread.Start() is called anywhere. This means we need to also include Thread.StartCallback
                 var methodToInclude = typeof(Thread).GetMethod("StartCallback", BindingFlags.Instance | BindingFlags.NonPublic);
@@ -1184,22 +1150,21 @@ namespace ArduinoCsCompiler
                     throw new NotSupportedException("The method Thread.StartCallback cannot be found");
                 }
 
-                PrepareMethod(set, new EquatableMethod(methodToInclude), new AnalysisStack(methodToInclude));
+                PrepareMethod(set, new EquatableMethod(methodToInclude), null);
             }
 
-            // Something has changed in .NET 8.0 for these - lets see what's missing
-            ////var c1 = set.Classes.FirstOrDefault(x => x.Name == "System.Threading.TimerQueue");
-            ////if (c1 != null)
-            ////{
-            ////    // We get here if Thread.Start() is called anywhere. This means we need to also include Thread.StartCallback
-            ////    var methodToInclude = c1.TheType.GetMethod("AppDomainTimerCallback", BindingFlags.Static | BindingFlags.NonPublic);
-            ////    if (methodToInclude == null)
-            ////    {
-            ////        throw new NotSupportedException("The method TimerQueue.AppDomainTimerCallback cannot be found");
-            ////    }
+            var c1 = set.Classes.FirstOrDefault(x => x.Name == "System.Threading.TimerQueue");
+            if (c1 != null)
+            {
+                // We get here if Thread.Start() is called anywhere. This means we need to also include Thread.StartCallback
+                var methodToInclude = c1.TheType.GetMethod("AppDomainTimerCallback", BindingFlags.Static | BindingFlags.NonPublic);
+                if (methodToInclude == null)
+                {
+                    throw new NotSupportedException("The method TimerQueue.AppDomainTimerCallback cannot be found");
+                }
 
-            ////    PrepareMethod(set, new EquatableMethod(methodToInclude), new AnalysisStack(methodToInclude));
-            ////}
+                PrepareMethod(set, new EquatableMethod(methodToInclude), null);
+            }
         }
 
         /// <summary>
@@ -1280,21 +1245,19 @@ namespace ArduinoCsCompiler
         /// <summary>
         /// Detects the required (potentially used) virtual methods in the execution set
         /// </summary>
-        private void DetectRequiredVirtualMethodImplementations(ExecutionSet set, List<ClassDeclaration> declarations, AnalysisStack stack)
+        private void DetectRequiredVirtualMethodImplementations(ExecutionSet set, List<ClassDeclaration> declarations)
         {
             foreach (var a in set.ArrayListImplementation)
             {
                 // this adds MiniArray.GetEnumerator(T[]) as implementation of T[].IList<T>()
-                PrepareMethod(set, a.Value, new AnalysisStack(a.Value));
+                PrepareMethod(set, a.Value, null);
                 var m = set.GetMethod(a.Value);
                 var arrayClass = set.Classes.Single(x => x.NewToken == (int)KnownTypeTokens.Array);
                 if (arrayClass.Members.All(y => y.Method != a.Value))
                 {
                     var interestingInterface = typeof(IEnumerable<>).MakeGenericType(a.Key);
                     var method = interestingInterface.GetMethod("GetEnumerator", BindingFlags.Public | BindingFlags.Instance | BindingFlags.FlattenHierarchy) ?? throw new MissingMethodException(interestingInterface.Name, "GetEnumerator");
-                    stack.Push(method);
-                    int interfaceMethodToken = set.GetOrAddMethodToken(method, stack);
-                    stack.Pop();
+                    int interfaceMethodToken = set.GetOrAddMethodToken(method, m.MethodBase);
                     arrayClass.AddClassMember(new ClassMember(a.Value, VariableKind.Method, m.Token, new List<int>() { interfaceMethodToken }));
                 }
             }
@@ -1309,7 +1272,7 @@ namespace ArduinoCsCompiler
                 for (var index = 0; index < methods.Count; index++)
                 {
                     var m = methods[index];
-                    if (MemberLinkRequired(set, m, stack, out var baseMethodInfos))
+                    if (MemberLinkRequired(set, m, out var baseMethodInfos))
                     {
                         var mb = (MethodBase)m; // This cast must work
 
@@ -1320,13 +1283,10 @@ namespace ArduinoCsCompiler
 
                         // If this method is required because base implementations are called, we also need its implementation (obviously)
                         // Unfortunately, this can recursively require further classes and methods
-                        var mbx = new EquatableMethod(mb);
-                        stack.Push(mbx);
-                        PrepareMethod(set, mbx, stack);
+                        PrepareMethod(set, mb, null);
 
-                        List<int> baseTokens = baseMethodInfos.Select(x => set.GetOrAddMethodToken(x, stack)).ToList();
-                        cls.AddClassMember(new ClassMember(mb, VariableKind.Method, set.GetOrAddMethodToken(mb, stack), baseTokens));
-                        stack.Pop();
+                        List<int> baseTokens = baseMethodInfos.Select(x => set.GetOrAddMethodToken(x, mb)).ToList();
+                        cls.AddClassMember(new ClassMember(mb, VariableKind.Method, set.GetOrAddMethodToken(mb, mb), baseTokens));
                     }
                 }
             }
@@ -1483,7 +1443,7 @@ namespace ArduinoCsCompiler
                 _logger.LogDebug("Loading user program methods...");
             }
 
-            var list = set.Methods().Values.Where(x => !fromSnapShot.AlreadyAssignedTokens.Contains(x.Token) && toSnapShot.AlreadyAssignedTokens.Contains(x.Token));
+            var list = set.Methods().Where(x => !fromSnapShot.AlreadyAssignedTokens.Contains(x.Token) && toSnapShot.AlreadyAssignedTokens.Contains(x.Token));
             var uploadList = list.OrderBy(x => (uint)x.Token).ToList();
             int cnt = uploadList.Count;
             int idx = 0;
@@ -1512,10 +1472,9 @@ namespace ArduinoCsCompiler
         /// </summary>
         /// <param name="set">The current execution set</param>
         /// <param name="method">The method instance</param>
-        /// <param name="stack">Analyzer stack</param>
         /// <param name="methodsBeingImplemented">Returns the list of methods (from interfaces or base classes) that this method implements</param>
         /// <returns>True if the method shall be part of the class declaration</returns>
-        private bool MemberLinkRequired(ExecutionSet set, MemberInfo method, AnalysisStack stack, out List<EquatableMethod> methodsBeingImplemented)
+        private bool MemberLinkRequired(ExecutionSet set, MemberInfo method, out List<EquatableMethod> methodsBeingImplemented)
         {
             methodsBeingImplemented = new List<EquatableMethod>();
 
@@ -1538,7 +1497,7 @@ namespace ArduinoCsCompiler
                 CollectBaseImplementations(set, new EquatableMethod(m), methodsBeingImplemented);
 
                 // We need the implementation if at least one base implementation is being called and is used
-                return methodsBeingImplemented.Any(x => set.HasMethod(x, stack, out _, out _));
+                return methodsBeingImplemented.Any(x => set.HasMethod(x, m, out _, out _));
             }
 
             return false;
@@ -1632,7 +1591,7 @@ namespace ArduinoCsCompiler
             for (var index = 0; index < fields.Count; index++)
             {
                 var f = fields[index];
-                GetVariableType(f.Name, f.FieldType, minSizeOfMember, out int sizeOfMember);
+                GetVariableType(f.FieldType, minSizeOfMember, out int sizeOfMember);
                 offset = sizeDynamic;
                 if (f.IsStatic)
                 {
@@ -1713,13 +1672,13 @@ namespace ArduinoCsCompiler
         /// Calculates the transitive hull of all types we need to instantiate this class and run its methods
         /// This can be a lengthy list!
         /// </summary>
-        private void DetermineBaseAndMembers(HashSet<Type> allTypesToLoad, Type classType, AnalysisStack stack)
+        private void DetermineBaseAndMembers(HashSet<Type> allTypesToLoad, Type classType)
         {
             if (classType.BaseType != null)
             {
                 if (AddClassDependency(allTypesToLoad, classType.BaseType))
                 {
-                    DetermineBaseAndMembers(allTypesToLoad, classType.BaseType, stack);
+                    DetermineBaseAndMembers(allTypesToLoad, classType.BaseType);
                 }
             }
 
@@ -1727,7 +1686,7 @@ namespace ArduinoCsCompiler
             {
                 if (AddClassDependency(allTypesToLoad, t))
                 {
-                    DetermineBaseAndMembers(allTypesToLoad, t, stack);
+                    DetermineBaseAndMembers(allTypesToLoad, t);
                 }
             }
 
@@ -1765,19 +1724,13 @@ namespace ArduinoCsCompiler
         /// Returns the type of a variable for the IL. This merely distinguishes signed from unsigned types, since
         /// the execution stack auto-extends smaller types.
         /// </summary>
-        /// <param name="fieldName">Name of the field</param>
         /// <param name="t">Type to query</param>
         /// <param name="minSizeOfMember">Minimum size of the member (used to force alignment)</param>
         /// <param name="sizeOfMember">Returns the actual size of the member, used for value-type arrays (because byte[] should use just one byte per entry)</param>
         /// <returns>VariableKind instance</returns>
-        internal static VariableKind GetVariableType(string fieldName, Type t, int minSizeOfMember, out int sizeOfMember)
+        internal static VariableKind GetVariableType(Type t, int minSizeOfMember, out int sizeOfMember)
         {
-            if (fieldName == null)
-            {
-                throw new InvalidOperationException();
-            }
-
-            string typeName = t.Name;
+            string name = t.Name;
 
             if (t.IsPointer)
             {
@@ -1863,18 +1816,12 @@ namespace ArduinoCsCompiler
                 return VariableKind.Uint64;
             }
 
-            if (t == typeof(UIntPtr) || t == typeof(IntPtr))
-            {
-                sizeOfMember = SizeOfVoidPointer();
-                return VariableKind.AddressOfVariable;
-            }
-
             if (t.IsArray)
             {
                 var elemType = t.GetElementType();
                 if (elemType!.IsValueType)
                 {
-                    GetVariableType(elemType.Name, elemType, minSizeOfMember, out sizeOfMember);
+                    GetVariableType(elemType, minSizeOfMember, out sizeOfMember);
                     return VariableKind.ValueArray;
                 }
                 else
@@ -1923,7 +1870,7 @@ namespace ArduinoCsCompiler
 
                 foreach (var f in t.GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)) // Not the static ones
                 {
-                    GetVariableType(f.Name, f.FieldType, minSizeOfMember, out var s);
+                    GetVariableType(f.FieldType, minSizeOfMember, out var s);
                     sizeOfMember += s;
                 }
 
@@ -1959,12 +1906,6 @@ namespace ArduinoCsCompiler
                 return VariableKind.LargeValueType;
             }
 
-            if (t.IsByRef)
-            {
-                sizeOfMember = SizeOfVoidPointer();
-                return VariableKind.AddressOfVariable;
-            }
-
             sizeOfMember = SizeOfVoidPointer();
             return VariableKind.Object;
         }
@@ -1977,6 +1918,9 @@ namespace ArduinoCsCompiler
         }
 
         internal static bool HasReplacementAttribute(Type type,
+#if NET5_0_OR_GREATER
+            [NotNullWhen(true)]
+#endif
             out ArduinoReplacementAttribute attribute)
         {
             var repl = type.GetCustomAttribute<ArduinoReplacementAttribute>();
@@ -1990,8 +1934,7 @@ namespace ArduinoCsCompiler
             return false;
         }
 
-        internal void CollectDependendentMethods(ExecutionSet set, EquatableMethod methodInfo, IlCode? code,
-            HashSet<EquatableMethod> newMethods, AnalysisStack stack)
+        internal void CollectDependendentMethods(ExecutionSet set, EquatableMethod methodInfo, IlCode? code, HashSet<EquatableMethod> newMethods)
         {
             if (methodInfo.IsAbstract)
             {
@@ -2008,8 +1951,7 @@ namespace ArduinoCsCompiler
 
             if (code == null)
             {
-                // TODO: Cache result of this (result is thrown away when called in this context and only used later)
-                code = IlCodeParser.FindAndPatchTokens(set, methodInfo.Method, stack);
+                code = IlCodeParser.FindAndPatchTokens(set, methodInfo.Method);
             }
 
             foreach (var method in code.DependentMethods)
@@ -2019,11 +1961,11 @@ namespace ArduinoCsCompiler
                 EquatableMethod? finalMethod = null;
                 if (replacementType != null)
                 {
-                    finalMethod = set.GetReplacement(method, stack, replacementType);
+                    finalMethod = set.GetReplacement(method, methodInfo, replacementType);
                 }
                 else
                 {
-                    finalMethod = set.GetReplacement(method, stack);
+                    finalMethod = set.GetReplacement(method, methodInfo);
                 }
 
                 if (finalMethod == null)
@@ -2035,20 +1977,16 @@ namespace ArduinoCsCompiler
                 {
                     // Ensure we're not scanning the same implementation twice, as this would result
                     // in a stack overflow when a method is recursive (even indirect)
-                    if (!set.HasMethod(me, stack, out var code1, out _) && newMethods.Add(me))
+                    if (!set.HasMethod(me, methodInfo, out var code1, out _) && newMethods.Add(me))
                     {
-                        stack.Push(me);
-                        CollectDependendentMethods(set, me, code1, newMethods, stack);
-                        stack.Pop();
+                        CollectDependendentMethods(set, me, code1, newMethods);
                     }
                 }
                 else if (finalMethod.Method is ConstructorInfo co)
                 {
-                    if (!set.HasMethod(co, stack, out var code2, out _) && newMethods.Add(co))
+                    if (!set.HasMethod(co, methodInfo, out var code2, out _) && newMethods.Add(co))
                     {
-                        stack.Push(co);
-                        CollectDependendentMethods(set, co, code2, newMethods, stack);
-                        stack.Pop();
+                        CollectDependendentMethods(set, co, code2, newMethods);
                     }
                 }
                 else
@@ -2082,7 +2020,7 @@ namespace ArduinoCsCompiler
                 throw new ObjectDisposedException(nameof(MicroCompiler));
             }
 
-            if (set.HasMethod(methodInfo, new AnalysisStack(), out _, out _))
+            if (set.HasMethod(methodInfo, methodInfo, out _, out _))
             {
                 unchecked
                 {
@@ -2161,6 +2099,7 @@ namespace ArduinoCsCompiler
                 set.SuppressType(typeof(System.Device.Gpio.Drivers.LibGpiodDriver));
                 set.SuppressType(typeof(System.Device.Gpio.Drivers.RaspberryPi3Driver));
                 set.SuppressType(typeof(System.Device.Gpio.Drivers.UnixDriver));
+                set.SuppressType(typeof(System.Device.Gpio.Drivers.Windows10Driver));
                 set.SuppressType(typeof(Iot.Device.Board.DummyGpioDriver));
                 set.SuppressType(typeof(Iot.Device.Board.KeyboardGpioDriver));
 
@@ -2190,17 +2129,15 @@ namespace ArduinoCsCompiler
                 set = new ExecutionSet(ExecutionSet.CompiledKernel, this, compilerSettings);
             }
 
-            AnalysisStack stack = new AnalysisStack(mainEntryPoint);
-
             if (mainEntryPoint.DeclaringType != null)
             {
-                PrepareClass(set, mainEntryPoint.DeclaringType, stack);
+                PrepareClass(set, mainEntryPoint.DeclaringType);
             }
 
-            PrepareMethod(set, mainEntryPoint, stack);
+            PrepareMethod(set, mainEntryPoint, null);
 
             set.MainEntryPointMethod = mainEntryPoint;
-            FinalizeExecutionSet(set, compilerSettings, stack, false);
+            FinalizeExecutionSet(set, false);
             return set;
         }
 
@@ -2260,8 +2197,6 @@ namespace ArduinoCsCompiler
             var exec = PrepareProgram(mainEntryPoint, settings);
             try
             {
-                // Use this to get a token map during a test run
-                // exec.WriteMapFile($"c:\\temp\\{mainEntryPoint.Name}_tokenMap.txt", new IlCapabilities());
                 exec.Load(true);
             }
             catch (Exception)
@@ -2278,449 +2213,442 @@ namespace ArduinoCsCompiler
         /// </summary>
         /// <param name="set">The execution set</param>
         /// <param name="methodInfo">The method to add</param>
-        /// <param name="stack">Method tracking stack</param>
+        /// <param name="parent">The parent method (for tracing only)</param>
         /// <returns>The new method token for the added method</returns>
         /// <exception cref="InvalidOperationException">A method should have been replaced, but is missing</exception>
-        internal int PrepareMethod(ExecutionSet set, EquatableMethod methodInfo, AnalysisStack stack)
+        internal int PrepareMethod(ExecutionSet set, EquatableMethod methodInfo, ArduinoMethodDeclaration? parent)
         {
             // Ensure the class is known, if it needs replacement
             var classReplacement = set.GetReplacement(methodInfo.DeclaringType);
-            EquatableMethod? replacement = set.GetReplacement(methodInfo, stack);
-            stack.Push(methodInfo);
-            try
+            EquatableMethod? replacement = set.GetReplacement(methodInfo, methodInfo);
+            EquatableMethod parentMethod = parent == null ? methodInfo : parent.MethodBase;
+            if (classReplacement != null && replacement == null)
             {
-                if (classReplacement != null && replacement == null)
-                {
-                    // See below, this is the fix for it
-                    replacement = set.GetReplacement(methodInfo, stack, classReplacement);
-                }
+                // See below, this is the fix for it
+                replacement = set.GetReplacement(methodInfo, parentMethod.Method, classReplacement);
+            }
 
-                if (replacement != null)
-                {
-                    methodInfo = replacement;
-                }
+            if (replacement != null)
+            {
+                methodInfo = replacement;
+            }
 
-                if (set.HasMethod(methodInfo, stack, out _, out int newToken))
-                {
-                    return newToken;
-                }
+            if (set.HasMethod(methodInfo, parentMethod, out _, out int newToken))
+            {
+                return newToken;
+            }
 
-                if (classReplacement != null && replacement == null)
-                {
-                    // If the class requires full replacement, all methods must be replaced (or throw an error inside GetReplacement, if it is not defined), but it must
-                    // never return null. Seen during development, because generic parameter types did not match.
-                    throw new InvalidOperationException($"Internal error: The class {classReplacement} should fully replace {methodInfo.DeclaringType}, however method {methodInfo} has no replacement (and no error either)");
-                }
+            if (classReplacement != null && replacement == null)
+            {
+                // If the class requires full replacement, all methods must be replaced (or throw an error inside GetReplacement, if it is not defined), but it must
+                // never return null. Seen during development, because generic parameter types did not match.
+                throw new InvalidOperationException($"Internal error: The class {classReplacement} should fully replace {methodInfo.DeclaringType}, however method {methodInfo} has no replacement (and no error either)");
+            }
 
-                if (EquatableMethod.HasArduinoImplementationAttribute(methodInfo, out var implementation) && implementation.MethodNumber != 0)
+            if (EquatableMethod.HasArduinoImplementationAttribute(methodInfo, out var implementation) && implementation!.MethodNumber != 0)
+            {
+                int tk1 = set.GetOrAddMethodToken(methodInfo, parentMethod);
+                var newInfo1 = new ArduinoMethodDeclaration(tk1, methodInfo, parent, MethodFlags.SpecialMethod, implementation!.MethodNumber);
+                set.AddMethod(newInfo1);
+                return newInfo1.Token;
+            }
+
+            if (HasIntrinsicAttribute(methodInfo))
+            {
+                // If the method is marked with [Intrinsic] (an internal attribute supporting the JIT compiler), we need to check whether it requires special handling as well.
+                // We cannot use the normal replacement technique with generic classes such as ByReference<T>, because Type.GetType doesn't allow open generic classes.
+                if (methodInfo.Name == ".ctor" && methodInfo.DeclaringType!.Name == "ByReference`1")
                 {
-                    int tk1 = set.GetOrAddMethodToken(methodInfo, stack);
-                    var newInfo1 = new ArduinoMethodDeclaration(tk1, methodInfo, stack, MethodFlags.SpecialMethod, implementation.MethodNumber);
+                    int tk1 = set.GetOrAddMethodToken(methodInfo, methodInfo);
+                    var newInfo1 = new ArduinoMethodDeclaration(tk1, methodInfo, parent, MethodFlags.SpecialMethod, ArduinoImplementationAttribute.GetStaticHashCode("ByReferenceCtor"));
                     set.AddMethod(newInfo1);
                     return newInfo1.Token;
                 }
 
-                if (HasIntrinsicAttribute(methodInfo))
+                if (methodInfo.Name == "get_Value" && methodInfo.DeclaringType!.Name == "ByReference`1")
                 {
-                    // If the method is marked with [Intrinsic] (an internal attribute supporting the JIT compiler), we need to check whether it requires special handling as well.
-                    // We cannot use the normal replacement technique with generic classes such as ByReference<T>, because Type.GetType doesn't allow open generic classes.
-                    if (methodInfo.Name == ".ctor" && methodInfo.DeclaringType!.Name == "ByReference`1")
-                    {
-                        int tk1 = set.GetOrAddMethodToken(methodInfo, stack);
-                        var newInfo1 = new ArduinoMethodDeclaration(tk1, methodInfo, stack, MethodFlags.SpecialMethod, ArduinoImplementationAttribute.GetStaticHashCode("ByReferenceCtor"));
-                        set.AddMethod(newInfo1);
-                        return newInfo1.Token;
-                    }
-
-                    if (methodInfo.Name == "get_Value" && methodInfo.DeclaringType!.Name == "ByReference`1")
-                    {
-                        int tk1 = set.GetOrAddMethodToken(methodInfo, stack);
-                        var newInfo1 = new ArduinoMethodDeclaration(tk1, methodInfo, stack, MethodFlags.SpecialMethod, ArduinoImplementationAttribute.GetStaticHashCode("ByReferenceValue"));
-                        set.AddMethod(newInfo1);
-                        return newInfo1.Token;
-                    }
+                    int tk1 = set.GetOrAddMethodToken(methodInfo, methodInfo);
+                    var newInfo1 = new ArduinoMethodDeclaration(tk1, methodInfo, parent, MethodFlags.SpecialMethod, ArduinoImplementationAttribute.GetStaticHashCode("ByReferenceValue"));
+                    set.AddMethod(newInfo1);
+                    return newInfo1.Token;
                 }
-
-                MethodFlags extraFlags = MethodFlags.None;
-                var specialFlags = methodInfo.GetMethodImplementationFlags();
-                if ((specialFlags & MethodImplAttributes.Synchronized) == MethodImplAttributes.Synchronized)
-                {
-                    if (methodInfo.IsStatic)
-                    {
-                        // This would require locking on the type. Doable, but if we don't need it, rather warn here.
-                        ErrorManager.AddError("ACS0006", $"Method {methodInfo.MemberInfoSignature()} has [MethodImpl(MethodImplAttributes.Synchronized)] and is static. This is not supported");
-                    }
-
-                    extraFlags |= MethodFlags.Synchronized;
-                }
-
-                var body = methodInfo.GetMethodBody();
-                bool hasBody = !methodInfo.IsAbstract;
-
-                var ilBytes = body?.GetILAsByteArray()!.ToArray();
-                IlCode parserResult;
-
-                bool constructedCode = false;
-                bool needsParsing = true;
-
-                List<FieldInfo> manuallyReferencedFields = new List<FieldInfo>();
-                List<MethodBase> dependentMethods = new List<MethodBase>();
-
-                if (body == null && !methodInfo.IsAbstract)
-                {
-                    Type multicastType = typeof(MulticastDelegate);
-                    if (multicastType.IsAssignableFrom(methodInfo.DeclaringType))
-                    {
-                        // The compiler inserts auto-generated code for the methods of the specific delegate.
-                        // We generate this code here.
-                        hasBody = true;
-                        if (methodInfo.IsConstructor)
-                        {
-                            // find the matching constructor in MulticastDelegate. Actually, we're not using a real constructor, but a method that acts on behalf of it
-                            var methods = multicastType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                            var baseCtor = methods.Single(x => x.Name == "CtorClosedStatic"); // Implementation is same for static and instance, except for a null test
-
-                            // Make sure this stub method is in memory
-                            PrepareMethod(set, baseCtor, stack);
-                            // Directly use the new token (the baseCtor.Token cannot be resolved further down, because it belongs to another assembly)
-                            int token = set.GetOrAddMethodToken(baseCtor, stack);
-                            needsParsing = false;
-
-                            // the code we need to generate is
-                            // LDARG.0
-                            // LDARG.1
-                            // LDARG.2
-                            // CALL MulticastDelegate.baseCtor // with the original ctor token!
-                            // RET
-                            byte[] code = new byte[]
-                            {
-                                02, // LDARG.0
-                                03, // LDARG.1
-                                04, // LDARG.2
-                                0x28, // CALL
-                                (byte)(token & 0xFF),
-                                (byte)((token >> 8) & 0xFF),
-                                (byte)((token >> 16) & 0xFF),
-                                (byte)((token >> 24) & 0xFF),
-                                0x2A, // RET
-                            };
-                            ilBytes = code;
-                            constructedCode = true;
-                            extraFlags |= MethodFlags.Ctor;
-                        }
-                        else
-                        {
-                            var args = methodInfo.GetParameters();
-                            Type t = methodInfo.DeclaringType!;
-                            var methodDetail = (MethodInfo)methodInfo.Method;
-                            var targetField = t.GetField("_target", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!;
-                            var methodPtrField = t.GetField("_methodPtr", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!;
-
-                            manuallyReferencedFields.Add(targetField);
-                            manuallyReferencedFields.Add(methodPtrField);
-
-                            List<byte> code = new List<byte>();
-                            int numargs = args.Length;
-                            if (methodInfo.IsStatic)
-                            {
-                                throw new InvalidOperationException("The Invoke() method of a delegate cannot be static");
-                            }
-
-                            code.Add((byte)OpCode.CEE_LDARG_0); // This is the this pointer of the delegate. We need to get its _target and _methodPtr references
-
-                            // Leaves the target object on the stack (null for static methods). We'll have to decide in the EE whether we need it or not (meaning whether
-                            // the actual target is static or not)
-                            int fieldToken = set.GetOrAddFieldToken(targetField);
-                            AddCommandWith32BitArgument(code, OpCode.CEE_LDFLD, fieldToken);
-
-                            // Push all remaining arguments to the stack -> they'll be the arguments to the method
-                            for (int i = 0; i < numargs; i++)
-                            {
-                                code.Add((byte)OpCode.CEE_LDARG_S);
-                                code.Add((byte)(i + 1));
-                            }
-
-                            code.Add((byte)OpCode.CEE_LDARG_0);
-
-                            // Leaves the target (of type method ptr) on the stack. This shall be the final argument to the calli instruction
-                            int methodFieldToken = set.GetOrAddFieldToken(methodPtrField);
-                            AddCommandWith32BitArgument(code, OpCode.CEE_LDFLD, methodFieldToken);
-
-                            AddCommandWith32BitArgument(code, OpCode.CEE_CALLI, 0); // The argument is irrelevant, the EE knows the calling convention to the target method, and we hope it matches
-
-                            code.Add((byte)OpCode.CEE_RET);
-                            ilBytes = code.ToArray();
-                            constructedCode = true;
-                            extraFlags |= MethodFlags.Virtual;
-                            if (methodDetail.ReturnType == typeof(void))
-                            {
-                                extraFlags |= MethodFlags.Void;
-                            }
-
-                            needsParsing = false; // We have already translated the tokens
-
-                            if (t.BaseType != null) // Should not really be the case here, ever.
-                            {
-                                if (!set.HasDefinition(t.BaseType))
-                                {
-                                    PrepareClass(set, t.BaseType, stack);
-                                }
-                            }
-                        }
-                    }
-                    else
-                    {
-                        ErrorManager.AddWarning("ACS0004", $"{methodInfo.MethodSignature()} has no visible implementation");
-                        return 0;
-                    }
-                }
-
-                if (methodInfo.Name == "MainStub" && methodInfo.DeclaringType == typeof(ArduinoNativeHelpers))
-                {
-                    // Assemble the startup code for our program. This shall contain a call to all static initializers and finally a call to the
-                    // original main method.
-                    extraFlags |= MethodFlags.Void | MethodFlags.Static;
-                    constructedCode = true;
-                    int token;
-                    needsParsing = false; // We insert already translated tokens (because the methods we call come from all possible places, the Resolve would otherwise fail)
-                    List<byte> code = new List<byte>();
-                    foreach (var m in set.FirmwareStartupSequence!)
-                    {
-                        // Use patched tokens
-                        token = set.GetOrAddMethodToken(m.Method, stack);
-                        AddCommandWith32BitArgument(code, OpCode.CEE_CALL, token);
-                    }
-
-                    var mainMethod = set.MainEntryPointMethod!;
-                    // This method must have 0 or 1 arguments (tested at the very beginning of the compiler run)
-                    if (mainMethod.GetParameters().Length == 1)
-                    {
-                        // the only argument is of type string[]. Create an empty array.
-                        AddCommand(code, OpCode.CEE_LDC_I4_0);
-                        token = set.GetOrAddClassToken(typeof(string[]).GetTypeInfo());
-                        AddCommandWith32BitArgument(code, OpCode.CEE_NEWARR, token);
-                    }
-
-                    token = set.GetOrAddMethodToken(mainMethod, stack);
-                    AddCommandWith32BitArgument(code, OpCode.CEE_CALL, token);
-
-                    if (mainMethod.ReturnType != typeof(void))
-                    {
-                        // discard return value, if any
-                        AddCommand(code, OpCode.CEE_POP);
-                    }
-
-                    AddCommand(code, OpCode.CEE_RET);
-                    ilBytes = code.ToArray();
-                }
-
-                if (EquatableMethod.HasAttribute(methodInfo, out ArduinoCompileTimeConstantAttribute ca))
-                {
-                    string methodName = ca.MethodName;
-                    object? result = null;
-                    bool takesThis = false;
-                    if (string.IsNullOrWhiteSpace(methodName))
-                    {
-                        // Only internal methods can have a name. In these cases, no test is done here, as we know what we need to do
-                        if (methodInfo.GetParameters().Length != 0)
-                        {
-                            throw new NotSupportedException("Methods marked with [ArduinoCompileTimeConstant] must not take parameters");
-                        }
-
-                        if (!methodInfo.IsStatic)
-                        {
-                            takesThis = true;
-                        }
-
-                        MethodInfo? mi = methodInfo.Method as MethodInfo;
-                        if (mi == null)
-                        {
-                            throw new NotSupportedException("[ArduinoCompileTimeConstant] cannot be applied to constructors");
-                        }
-
-                        object? instanceToCallOn = null;
-                        if (takesThis)
-                        {
-                            instanceToCallOn = Activator.CreateInstance(methodInfo.DeclaringType!, true);
-                        }
-
-                        result = methodInfo.Method.Invoke(instanceToCallOn, Array.Empty<object?>());
-                    }
-
-                    Type? t = result?.GetType();
-
-                    List<byte> code = new List<byte>();
-
-                    if (methodName == nameof(MiniInterop.Kernel32.GetDynamicTimeZoneInformation))
-                    {
-                        MiniInterop.TIME_DYNAMIC_ZONE_INFORMATION tdyz = new MiniInterop.TIME_DYNAMIC_ZONE_INFORMATION();
-                        uint res = Interop.GetDynamicTimeZoneInformation(out tdyz);
-
-                        InitStructFromConstant(set, stack, tdyz, code, dependentMethods);
-
-                        AddCommandWith32BitArgument(code, OpCode.CEE_LDC_I4, (int)res);
-                    }
-                    else if (methodName == nameof(MiniInterop.Kernel32.GetTimeZoneInformation))
-                    {
-                        MiniInterop.TIME_ZONE_INFORMATION tz = new MiniInterop.TIME_ZONE_INFORMATION();
-                        uint res = Interop.GetTimeZoneInformation(out tz);
-
-                        InitStructFromConstant(set, stack, tz, code, dependentMethods);
-                        AddCommandWith32BitArgument(code, OpCode.CEE_LDC_I4, (int)res);
-                    }
-                    else if (t == null || result == null)
-                    {
-                        AddCommand(code, OpCode.CEE_LDNULL);
-                    }
-                    else if (t == typeof(TimeSpan))
-                    {
-                        AddCommandWith64BitArgument(code, OpCode.CEE_LDC_I8, ((TimeSpan)result).Ticks);
-                    }
-                    else if (t == typeof(string))
-                    {
-                        int stringToken = set.GetOrAddString((string)result);
-                        AddCommandWith32BitArgument(code, OpCode.CEE_LDSTR, stringToken);
-                    }
-                    else if (t == typeof(byte[]))
-                    {
-                        byte[] bytes = (byte[])result;
-                        var field = typeof(MiniInterop.Dummy).GetField(nameof(MiniInterop.Dummy.TZI))!;
-                        int dataToken = set.GetOrAddFieldToken(field, bytes);
-                        AddCommandWith32BitArgument(code, OpCode.CEE_LDC_I4, bytes.Length);
-                        AddCommandWith32BitArgument(code, OpCode.CEE_NEWARR, (int)KnownTypeTokens.Byte);
-                        AddCommand(code, OpCode.CEE_DUP);
-                        AddCommandWith32BitArgument(code, OpCode.CEE_LDTOKEN, dataToken);
-                        var method2 = typeof(System.Runtime.CompilerServices.RuntimeHelpers).GetMethod("InitializeArray")!;
-                        int initializeFunctionToken = set.GetOrAddMethodToken(method2, stack);
-                        AddCommandWith32BitArgument(code, OpCode.CEE_CALL, initializeFunctionToken);
-                    }
-                    else if (t == typeof(string[]))
-                    {
-                        string[] strings = (string[])result;
-                        // Create an array of strings
-                        AddCommandWith32BitArgument(code, OpCode.CEE_LDC_I4, strings.Length);
-                        AddCommandWith32BitArgument(code, OpCode.CEE_NEWARR, (int)KnownTypeTokens.String);
-                        for (var index = 0; index < strings.Length; index++)
-                        {
-                            // fill the elements of the array, one after the other
-                            var s = strings[index];
-                            AddCommand(code, OpCode.CEE_DUP);
-                            AddCommandWith32BitArgument(code, OpCode.CEE_LDC_I4, index);
-                            int stringToken = set.GetOrAddString(s);
-                            AddCommandWith32BitArgument(code, OpCode.CEE_LDSTR, stringToken);
-                            // Pops three values from the stack, so that the array should remain
-                            AddCommandWith32BitArgument(code, OpCode.CEE_STELEM, (int)KnownTypeTokens.String);
-                        }
-                    }
-                    else
-                    {
-                        throw new NotSupportedException($"[ArduinoCompileTimeConstant] for type {t} is not implemented");
-                    }
-
-                    AddCommand(code, OpCode.CEE_RET);
-                    ilBytes = code.ToArray();
-                    needsParsing = false;
-                }
-
-                if (ilBytes == null && hasBody)
-                {
-                    throw new MissingMethodException($"{methodInfo.MethodSignature()} has no visible implementation but a body");
-                }
-
-                if (ilBytes != null && ilBytes.Length > Math.Pow(2, 14) - 1)
-                {
-                    throw new InvalidProgramException($"Max IL size of real time method is 2^14 Bytes. Actual size is {ilBytes.Length}.");
-                }
-
-                if (needsParsing == false)
-                {
-                    parserResult = new IlCode(methodInfo, ilBytes, dependentMethods, manuallyReferencedFields, new List<TypeInfo>(), new List<ExceptionClause>());
-                }
-                else if (hasBody)
-                {
-                    parserResult = IlCodeParser.FindAndPatchTokens(set, methodInfo, stack, ilBytes!);
-
-                    foreach (var type in parserResult.DependentTypes)
-                    {
-                        if (!set.HasDefinition(type))
-                        {
-                            PrepareClass(set, type, stack);
-                        }
-                    }
-                }
-                else
-                {
-                    parserResult = new IlCode(methodInfo, null);
-                }
-
-                int tk = set.GetOrAddMethodToken(methodInfo, stack);
-
-                ArduinoMethodDeclaration newInfo;
-                if (constructedCode)
-                {
-                    newInfo = new ArduinoMethodDeclaration(tk, methodInfo, stack, extraFlags, 0, Math.Max(8, methodInfo.GetParameters().Length + 3), parserResult);
-                }
-                else
-                {
-                    newInfo = new ArduinoMethodDeclaration(tk, methodInfo, stack, parserResult, extraFlags);
-                }
-
-                if (set.AddMethod(newInfo))
-                {
-                    // If the class containing this method contains statics, we need to send its declaration
-                    // TODO: Parse code to check for LDSFLD or STSFLD instructions and skip if none found.
-                    if (methodInfo.DeclaringType != null && GetClassSize(methodInfo.DeclaringType, null).Statics > 0)
-                    {
-                        if (MicroCompiler.HasReplacementAttribute(methodInfo.DeclaringType!, out var attribute) && attribute.ReplaceEntireType == false)
-                        {
-                            // If this _is_ the replacement class already, and we're not replacing the full type, add the original type, or we end up with
-                            // both the original and the replacement types in the execution set.
-                            if (attribute.TypeToReplace != null)
-                            {
-                                PrepareClass(set, attribute.TypeToReplace, stack);
-                            }
-                        }
-                        else
-                        {
-                            PrepareClass(set, methodInfo.DeclaringType, stack);
-                        }
-                    }
-
-                    // TODO: Change to dictionary and transfer IlCode object to correct place (it's evaluated inside, but discarded there)
-                    HashSet<EquatableMethod> methods = new HashSet<EquatableMethod>();
-                    CollectDependendentMethods(set, methodInfo, parserResult, methods, stack);
-
-                    var list = methods.ToList();
-                    for (var index = 0; index < list.Count; index++)
-                    {
-                        var dep = list[index];
-                        // If we have a ctor in the call chain we need to ensure we have its class loaded.
-                        // This happens if the created object is only used in local variables but not as a class member
-                        // seen so far.
-                        if (dep.IsConstructor && dep.DeclaringType != null)
-                        {
-                            PrepareClass(set, dep.DeclaringType, stack);
-                        }
-                        else if (dep.DeclaringType != null && HasStaticFields(dep.DeclaringType))
-                        {
-                            // Also load the class declaration if it contains static fields.
-                            // TODO: We currently assume that no class is accessing static fields of another class.
-                            PrepareClass(set, dep.DeclaringType, stack);
-                        }
-
-                        PrepareMethod(set, dep, stack);
-                    }
-                }
-
-                return newInfo.Token;
             }
-            finally
+
+            MethodFlags extraFlags = MethodFlags.None;
+            var specialFlags = methodInfo.GetMethodImplementationFlags();
+            if ((specialFlags & MethodImplAttributes.Synchronized) == MethodImplAttributes.Synchronized)
             {
-                stack.Pop();
+                if (methodInfo.IsStatic)
+                {
+                    // This would require locking on the type. Doable, but if we don't need it, rather warn here.
+                    ErrorManager.AddError("ACS0006", $"Method {methodInfo.MemberInfoSignature()} has [MethodImpl(MethodImplAttributes.Synchronized)] and is static. This is not supported");
+                }
+
+                extraFlags |= MethodFlags.Synchronized;
             }
+
+            var body = methodInfo.GetMethodBody();
+            bool hasBody = !methodInfo.IsAbstract;
+
+            var ilBytes = body?.GetILAsByteArray()!.ToArray();
+            IlCode parserResult;
+
+            bool constructedCode = false;
+            bool needsParsing = true;
+
+            List<FieldInfo> manuallyReferencedFields = new List<FieldInfo>();
+            List<MethodBase> dependentMethods = new List<MethodBase>();
+
+            if (body == null && !methodInfo.IsAbstract)
+            {
+                Type multicastType = typeof(MulticastDelegate);
+                if (multicastType.IsAssignableFrom(methodInfo.DeclaringType))
+                {
+                    // The compiler inserts auto-generated code for the methods of the specific delegate.
+                    // We generate this code here.
+                    hasBody = true;
+                    if (methodInfo.IsConstructor)
+                    {
+                        // find the matching constructor in MulticastDelegate. Actually, we're not using a real constructor, but a method that acts on behalf of it
+                        var methods = multicastType.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+                        var baseCtor = methods.Single(x => x.Name == "CtorClosedStatic"); // Implementation is same for static and instance, except for a null test
+
+                        // Make sure this stub method is in memory
+                        PrepareMethod(set, baseCtor, parent);
+                        // Directly use the new token (the baseCtor.Token cannot be resolved further down, because it belongs to another assembly)
+                        int token = set.GetOrAddMethodToken(baseCtor, methodInfo);
+                        needsParsing = false;
+
+                        // the code we need to generate is
+                        // LDARG.0
+                        // LDARG.1
+                        // LDARG.2
+                        // CALL MulticastDelegate.baseCtor // with the original ctor token!
+                        // RET
+                        byte[] code = new byte[]
+                        {
+                            02, // LDARG.0
+                            03, // LDARG.1
+                            04, // LDARG.2
+                            0x28, // CALL
+                            (byte)(token & 0xFF),
+                            (byte)((token >> 8) & 0xFF),
+                            (byte)((token >> 16) & 0xFF),
+                            (byte)((token >> 24) & 0xFF),
+                            0x2A, // RET
+                        };
+                        ilBytes = code;
+                        constructedCode = true;
+                        extraFlags |= MethodFlags.Ctor;
+                    }
+                    else
+                    {
+                        var args = methodInfo.GetParameters();
+                        Type t = methodInfo.DeclaringType!;
+                        var methodDetail = (MethodInfo)methodInfo.Method;
+                        var targetField = t.GetField("_target", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!;
+                        var methodPtrField = t.GetField("_methodPtr", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)!;
+
+                        manuallyReferencedFields.Add(targetField);
+                        manuallyReferencedFields.Add(methodPtrField);
+
+                        List<byte> code = new List<byte>();
+                        int numargs = args.Length;
+                        if (methodInfo.IsStatic)
+                        {
+                            throw new InvalidOperationException("The Invoke() method of a delegate cannot be static");
+                        }
+
+                        code.Add((byte)OpCode.CEE_LDARG_0); // This is the this pointer of the delegate. We need to get its _target and _methodPtr references
+
+                        // Leaves the target object on the stack (null for static methods). We'll have to decide in the EE whether we need it or not (meaning whether
+                        // the actual target is static or not)
+                        int fieldToken = set.GetOrAddFieldToken(targetField);
+                        AddCommandWith32BitArgument(code, OpCode.CEE_LDFLD, fieldToken);
+
+                        // Push all remaining arguments to the stack -> they'll be the arguments to the method
+                        for (int i = 0; i < numargs; i++)
+                        {
+                            code.Add((byte)OpCode.CEE_LDARG_S);
+                            code.Add((byte)(i + 1));
+                        }
+
+                        code.Add((byte)OpCode.CEE_LDARG_0);
+
+                        // Leaves the target (of type method ptr) on the stack. This shall be the final argument to the calli instruction
+                        int methodFieldToken = set.GetOrAddFieldToken(methodPtrField);
+                        AddCommandWith32BitArgument(code, OpCode.CEE_LDFLD, methodFieldToken);
+
+                        AddCommandWith32BitArgument(code, OpCode.CEE_CALLI, 0); // The argument is irrelevant, the EE knows the calling convention to the target method, and we hope it matches
+
+                        code.Add((byte)OpCode.CEE_RET);
+                        ilBytes = code.ToArray();
+                        constructedCode = true;
+                        extraFlags |= MethodFlags.Virtual;
+                        if (methodDetail.ReturnType == typeof(void))
+                        {
+                            extraFlags |= MethodFlags.Void;
+                        }
+
+                        needsParsing = false; // We have already translated the tokens
+
+                        if (t.BaseType != null) // Should not really be the case here, ever.
+                        {
+                            if (!set.HasDefinition(t.BaseType))
+                            {
+                                PrepareClass(set, t.BaseType);
+                            }
+                        }
+                    }
+                }
+                else
+                {
+                    ErrorManager.AddWarning("ACS0004", $"{methodInfo.MethodSignature()} has no visible implementation");
+                    return 0;
+                }
+            }
+
+            if (methodInfo.Name == "MainStub" && methodInfo.DeclaringType == typeof(ArduinoNativeHelpers))
+            {
+                // Assemble the startup code for our program. This shall contain a call to all static initializers and finally a call to the
+                // original main method.
+                extraFlags |= MethodFlags.Void | MethodFlags.Static;
+                constructedCode = true;
+                int token;
+                needsParsing = false; // We insert already translated tokens (because the methods we call come from all possible places, the Resolve would otherwise fail)
+                List<byte> code = new List<byte>();
+                foreach (var m in set.FirmwareStartupSequence!)
+                {
+                    // Use patched tokens
+                    token = set.GetOrAddMethodToken(m.Method, parentMethod);
+                    AddCommandWith32BitArgument(code, OpCode.CEE_CALL, token);
+                }
+
+                var mainMethod = set.MainEntryPointMethod!;
+                // This method must have 0 or 1 arguments (tested at the very beginning of the compiler run)
+                if (mainMethod.GetParameters().Length == 1)
+                {
+                    // the only argument is of type string[]. Create an empty array.
+                    AddCommand(code, OpCode.CEE_LDC_I4_0);
+                    token = set.GetOrAddClassToken(typeof(string[]).GetTypeInfo());
+                    AddCommandWith32BitArgument(code, OpCode.CEE_NEWARR, token);
+                }
+
+                token = set.GetOrAddMethodToken(mainMethod, parentMethod);
+                AddCommandWith32BitArgument(code, OpCode.CEE_CALL, token);
+
+                if (mainMethod.ReturnType != typeof(void))
+                {
+                    // discard return value, if any
+                    AddCommand(code, OpCode.CEE_POP);
+                }
+
+                AddCommand(code, OpCode.CEE_RET);
+                ilBytes = code.ToArray();
+            }
+
+            if (EquatableMethod.HasAttribute(methodInfo, out ArduinoCompileTimeConstantAttribute ca))
+            {
+                string methodName = ca.MethodName;
+                object? result = null;
+                bool takesThis = false;
+                if (string.IsNullOrWhiteSpace(methodName))
+                {
+                    // Only internal methods can have a name. In these cases, no test is done here, as we know what we need to do
+                    if (methodInfo.GetParameters().Length != 0)
+                    {
+                        throw new NotSupportedException("Methods marked with [ArduinoCompileTimeConstant] must not take parameters");
+                    }
+
+                    if (!methodInfo.IsStatic)
+                    {
+                        takesThis = true;
+                    }
+
+                    MethodInfo? mi = methodInfo.Method as MethodInfo;
+                    if (mi == null)
+                    {
+                        throw new NotSupportedException("[ArduinoCompileTimeConstant] cannot be applied to constructors");
+                    }
+
+                    object? instanceToCallOn = null;
+                    if (takesThis)
+                    {
+                        instanceToCallOn = Activator.CreateInstance(methodInfo.DeclaringType!, true);
+                    }
+
+                    result = methodInfo.Method.Invoke(instanceToCallOn, Array.Empty<object?>());
+                }
+
+                Type? t = result?.GetType();
+
+                List<byte> code = new List<byte>();
+
+                if (methodName == nameof(MiniInterop.Kernel32.GetDynamicTimeZoneInformation))
+                {
+                    MiniInterop.TIME_DYNAMIC_ZONE_INFORMATION tdyz = new MiniInterop.TIME_DYNAMIC_ZONE_INFORMATION();
+                    uint res = Interop.GetDynamicTimeZoneInformation(out tdyz);
+
+                    InitStructFromConstant(set, methodInfo, tdyz, code, dependentMethods);
+
+                    AddCommandWith32BitArgument(code, OpCode.CEE_LDC_I4, (int)res);
+                }
+                else if (methodName == nameof(MiniInterop.Kernel32.GetTimeZoneInformation))
+                {
+                    MiniInterop.TIME_ZONE_INFORMATION tz = new MiniInterop.TIME_ZONE_INFORMATION();
+                    uint res = Interop.GetTimeZoneInformation(out tz);
+
+                    InitStructFromConstant(set, methodInfo, tz, code, dependentMethods);
+                    AddCommandWith32BitArgument(code, OpCode.CEE_LDC_I4, (int)res);
+                }
+                else if (t == null || result == null)
+                {
+                    AddCommand(code, OpCode.CEE_LDNULL);
+                }
+                else if (t == typeof(TimeSpan))
+                {
+                    AddCommandWith64BitArgument(code, OpCode.CEE_LDC_I8, ((TimeSpan)result).Ticks);
+                }
+                else if (t == typeof(string))
+                {
+                    int stringToken = set.GetOrAddString((string)result);
+                    AddCommandWith32BitArgument(code, OpCode.CEE_LDSTR, stringToken);
+                }
+                else if (t == typeof(byte[]))
+                {
+                    byte[] bytes = (byte[])result;
+                    var field = typeof(MiniInterop.Dummy).GetField(nameof(MiniInterop.Dummy.TZI))!;
+                    int dataToken = set.GetOrAddFieldToken(field, bytes);
+                    AddCommandWith32BitArgument(code, OpCode.CEE_LDC_I4, bytes.Length);
+                    AddCommandWith32BitArgument(code, OpCode.CEE_NEWARR, (int)KnownTypeTokens.Byte);
+                    AddCommand(code, OpCode.CEE_DUP);
+                    AddCommandWith32BitArgument(code, OpCode.CEE_LDTOKEN, dataToken);
+                    var method2 = typeof(System.Runtime.CompilerServices.RuntimeHelpers).GetMethod("InitializeArray")!;
+                    int initializeFunctionToken = set.GetOrAddMethodToken(method2, parentMethod);
+                    AddCommandWith32BitArgument(code, OpCode.CEE_CALL, initializeFunctionToken);
+                }
+                else if (t == typeof(string[]))
+                {
+                    string[] strings = (string[])result;
+                    // Create an array of strings
+                    AddCommandWith32BitArgument(code, OpCode.CEE_LDC_I4, strings.Length);
+                    AddCommandWith32BitArgument(code, OpCode.CEE_NEWARR, (int)KnownTypeTokens.String);
+                    for (var index = 0; index < strings.Length; index++)
+                    {
+                        // fill the elements of the array, one after the other
+                        var s = strings[index];
+                        AddCommand(code, OpCode.CEE_DUP);
+                        AddCommandWith32BitArgument(code, OpCode.CEE_LDC_I4, index);
+                        int stringToken = set.GetOrAddString(s);
+                        AddCommandWith32BitArgument(code, OpCode.CEE_LDSTR, stringToken);
+                        // Pops three values from the stack, so that the array should remain
+                        AddCommandWith32BitArgument(code, OpCode.CEE_STELEM, (int)KnownTypeTokens.String);
+                    }
+                }
+                else
+                {
+                    throw new NotSupportedException($"[ArduinoCompileTimeConstant] for type {t} is not implemented");
+                }
+
+                AddCommand(code, OpCode.CEE_RET);
+                ilBytes = code.ToArray();
+                needsParsing = false;
+            }
+
+            if (ilBytes == null && hasBody)
+            {
+                throw new MissingMethodException($"{methodInfo.MethodSignature()} has no visible implementation but a body");
+            }
+
+            if (ilBytes != null && ilBytes.Length > Math.Pow(2, 14) - 1)
+            {
+                throw new InvalidProgramException($"Max IL size of real time method is 2^14 Bytes. Actual size is {ilBytes.Length}.");
+            }
+
+            if (needsParsing == false)
+            {
+                parserResult = new IlCode(methodInfo, ilBytes, dependentMethods, manuallyReferencedFields, new List<TypeInfo>(), new List<ExceptionClause>());
+            }
+            else if (hasBody)
+            {
+                parserResult = IlCodeParser.FindAndPatchTokens(set, methodInfo, ilBytes!);
+
+                foreach (var type in parserResult.DependentTypes)
+                {
+                    if (!set.HasDefinition(type))
+                    {
+                        PrepareClass(set, type);
+                    }
+                }
+            }
+            else
+            {
+                parserResult = new IlCode(methodInfo, null);
+            }
+
+            int tk = set.GetOrAddMethodToken(methodInfo, parentMethod);
+
+            ArduinoMethodDeclaration newInfo;
+            if (constructedCode)
+            {
+                newInfo = new ArduinoMethodDeclaration(tk, methodInfo, parent, extraFlags, 0, Math.Max(8, methodInfo.GetParameters().Length + 3), parserResult);
+            }
+            else
+            {
+                newInfo = new ArduinoMethodDeclaration(tk, methodInfo, parent, parserResult, extraFlags);
+            }
+
+            if (set.AddMethod(newInfo))
+            {
+                // If the class containing this method contains statics, we need to send its declaration
+                // TODO: Parse code to check for LDSFLD or STSFLD instructions and skip if none found.
+                if (methodInfo.DeclaringType != null && GetClassSize(methodInfo.DeclaringType, null).Statics > 0)
+                {
+                    if (MicroCompiler.HasReplacementAttribute(methodInfo.DeclaringType!, out var attribute) && attribute.ReplaceEntireType == false)
+                    {
+                        // If this _is_ the replacement class already, and we're not replacing the full type, add the original type, or we end up with
+                        // both the original and the replacement types in the execution set.
+                        if (attribute.TypeToReplace != null)
+                        {
+                            PrepareClass(set, attribute.TypeToReplace);
+                        }
+                    }
+                    else
+                    {
+                        PrepareClass(set, methodInfo.DeclaringType);
+                    }
+                }
+
+                // TODO: Change to dictionary and transfer IlCode object to correct place (it's evaluated inside, but discarded there)
+                HashSet<EquatableMethod> methods = new HashSet<EquatableMethod>();
+                CollectDependendentMethods(set, methodInfo, parserResult, methods);
+
+                var list = methods.ToList();
+                for (var index = 0; index < list.Count; index++)
+                {
+                    var dep = list[index];
+                    // If we have a ctor in the call chain we need to ensure we have its class loaded.
+                    // This happens if the created object is only used in local variables but not as a class member
+                    // seen so far.
+                    if (dep.IsConstructor && dep.DeclaringType != null)
+                    {
+                        PrepareClass(set, dep.DeclaringType);
+                    }
+                    else if (dep.DeclaringType != null && HasStaticFields(dep.DeclaringType))
+                    {
+                        // Also load the class declaration if it contains static fields.
+                        // TODO: We currently assume that no class is accessing static fields of another class.
+                        PrepareClass(set, dep.DeclaringType);
+                    }
+
+                    PrepareMethod(set, dep, newInfo);
+                }
+            }
+
+            return newInfo.Token;
         }
 
-        private void InitStructFromConstant<T>(ExecutionSet set, AnalysisStack stack, T information, List<byte> code, List<MethodBase> dependentMethods)
+        private void InitStructFromConstant<T>(ExecutionSet set, EquatableMethod parentMethod, T information, List<byte> code, List<MethodBase> dependentMethods)
             where T : struct
         {
             var data = GetBytes(information);
@@ -2744,7 +2672,7 @@ namespace ArduinoCsCompiler
             AddCommand(code, OpCode.CEE_DUP);
             AddCommandWith32BitArgument(code, OpCode.CEE_LDTOKEN, dataToken);
             var method2 = typeof(System.Runtime.CompilerServices.RuntimeHelpers).GetMethod("InitializeArray")!;
-            int initializeFunctionToken = set.GetOrAddMethodToken(method2, stack);
+            int initializeFunctionToken = set.GetOrAddMethodToken(method2, parentMethod);
             AddCommandWith32BitArgument(code, OpCode.CEE_CALL, initializeFunctionToken);
             AddCommand(code, OpCode.CEE_LDC_I4_0);
             AddCommand(code, OpCode.CEE_LDARG_0);
@@ -2754,7 +2682,7 @@ namespace ArduinoCsCompiler
             {
                 typeof(byte[]), typeof(int), typeof(IntPtr), typeof(int)
             })!;
-            int copyToken = set.GetOrAddMethodToken(method3, stack);
+            int copyToken = set.GetOrAddMethodToken(method3, parentMethod);
             dependentMethods.Add(method3);
             AddCommandWith32BitArgument(code, OpCode.CEE_CALL, copyToken);
         }
@@ -2829,18 +2757,7 @@ namespace ArduinoCsCompiler
                 {
                     var classType = body.LocalVariables[i].LocalType;
                     // This also needs alignment, because "classType" might be a long value type
-                    int minSize = 1;
-                    if (!classType.IsValueType)
-                    {
-                        minSize = SizeOfVoidPointer();
-                    }
-
-                    if (classType.IsValueType && !classType.IsPrimitive)
-                    {
-                        minSize = SizeOfVoidPointer();
-                    }
-
-                    var type = GetVariableType($"Local{i}", classType, minSize, out int size);
+                    var type = GetVariableType(classType, SizeOfVoidPointer(), out int size);
                     ClassMember local = new ClassMember($"Local #{i}", type, 0, (ushort)size);
                     localTypes[i] = local;
                 }
@@ -2860,7 +2777,7 @@ namespace ArduinoCsCompiler
             for (i = startOffset; i < decl.ArgumentCount; i++)
             {
                 var classType = parameters[i - startOffset].ParameterType;
-                var type = GetVariableType($"Argument{i}", classType, SizeOfVoidPointer(), out var size);
+                var type = GetVariableType(classType, SizeOfVoidPointer(), out var size);
                 ClassMember arg = new ClassMember($"Argument {i}", type, 0, size);
                 argTypes[i] = arg;
             }
@@ -2872,17 +2789,15 @@ namespace ArduinoCsCompiler
         {
             List<ClassDeclaration> classes = set.Classes.Where(x => !x.SuppressInit && x.TheType.TypeInitializer != null).ToList();
             List<IlCode> codeSequences = new List<IlCode>();
-            var stack = new AnalysisStack();
             for (var index = 0; index < classes.Count; index++)
             {
                 ClassDeclaration? cls = classes[index];
                 if (!cls.SuppressInit && cls.TheType.TypeInitializer != null)
                 {
-                    set.HasMethod(cls.TheType.TypeInitializer, stack, out var code, out _);
+                    set.HasMethod(cls.TheType.TypeInitializer, cls.TheType.TypeInitializer, out var code, out _);
                     if (code == null)
                     {
-                        // Class is normally expected to have a cctor, but we're suppressing it as not required
-                        continue;
+                        throw new InvalidOperationException("Inconsistent data set");
                     }
 
                     codeSequences.Add(code);
@@ -2895,9 +2810,6 @@ namespace ArduinoCsCompiler
             // We need to figure out dependencies between the cctors (i.e. we know that System.Globalization.JapaneseCalendar..ctor depends on System.DateTime..cctor)
             // For now, we just do that by "knowledge" (analyzing the code manually showed these dependencies)
             // The last of the BringToFront elements below will be the first cctor that gets executed
-
-            // Some test uses Array.Empty<int>, this relies on this one. Something that could probably be auto-detected.
-            BringToFront(codeSequences, GetSystemPrivateType("System.Array+EmptyArray`1").MakeGenericType(typeof(int)));
             BringToFront(codeSequences, typeof(UnitsNet.BaseUnits));
             BringToFront(codeSequences, typeof(UnitsNet.BaseDimensions));
             BringToFront(codeSequences, typeof(UnitsNet.QuantityInfo));
@@ -2908,7 +2820,6 @@ namespace ArduinoCsCompiler
             BringToFront(codeSequences, typeof(System.Text.EncoderReplacementFallback));
             BringToFront(codeSequences, typeof(System.Text.EncoderExceptionFallback));
             BringToFront(codeSequences, GetSystemPrivateType("System.Diagnostics.Tracing.FrameworkEventSource"));
-            BringToFront(codeSequences, GetSystemPrivateType("System.Diagnostics.Tracing.NativeRuntimeEventSource"));
             BringToFront(codeSequences, typeof(CancellationTokenSource));
             BringToFront(codeSequences, typeof(MiniCultureInfo));
             BringToFront(codeSequences, typeof(Stopwatch));
@@ -3201,19 +3112,12 @@ namespace ArduinoCsCompiler
                 if (_commandHandler.IlCapabilities != null)
                 {
                     ilCapabilities = _commandHandler.IlCapabilities;
-                    if (ilCapabilities.ProtocolVersion != ProtocolVersion)
-                    {
-                        _logger.LogError("Board capabilities received, but protocol version does not match.");
-                        return false;
-                    }
-
                     return true;
                 }
 
                 Thread.Sleep(50);
             }
 
-            _logger.LogError("Couldn't query board capabilities. Possibly incompatible firmware");
             return false;
         }
 

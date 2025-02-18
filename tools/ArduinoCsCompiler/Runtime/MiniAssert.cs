@@ -69,11 +69,6 @@ namespace ArduinoCsCompiler.Runtime
             That(expected == actual, $"Expected {expected}, actual {actual}");
         }
 
-        public static void AreNotEqual(int expected, int actual)
-        {
-            That(expected != actual, $"Expected {expected}, actual {actual}");
-        }
-
         public static void AreEqual(double expected, double actual)
         {
             AreEqual(expected, actual, 0);

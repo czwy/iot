@@ -21,5 +21,11 @@ namespace ArduinoCsCompiler.Runtime
         {
             throw new NotImplementedException();
         }
+
+        [ArduinoImplementation("DelegateCompareUnmanagedFunctionPtrs")]
+        public static Boolean CompareUnmanagedFunctionPtrs(Delegate d1, Delegate d2)
+        {
+            throw new NotImplementedException();
+        }
     }
 }

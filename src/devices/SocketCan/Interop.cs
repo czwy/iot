@@ -34,7 +34,7 @@ namespace Iot.Device.SocketCan
         private static extern int CreateNativeSocket(int domain, int type, CanProtocol protocol);
 
         [DllImport("libc", EntryPoint = "ioctl", CallingConvention = CallingConvention.Cdecl)]
-        private static extern int Ioctl3(int fd, uint request, ref InterfaceIndexQuery ifr);
+        private static extern int Ioctl3(int fd, uint request, ref ifreq ifr);
 
         [DllImport("libc", EntryPoint = "bind", CallingConvention = CallingConvention.Cdecl)]
         private static extern int BindSocket(int fd, ref CanSocketAddress addr, uint addrlen);
@@ -126,17 +126,17 @@ namespace Iot.Device.SocketCan
         private static unsafe int GetInterfaceIndex(int fd, string name)
         {
             const uint SIOCGIFINDEX = 0x8933;
-            const int maxLen = InterfaceIndexQuery.IFNAMSIZ - 1;
+            const int MaxLen = ifreq.IFNAMSIZ - 1;
 
-            if (name.Length >= maxLen)
+            if (name.Length >= MaxLen)
             {
-                throw new ArgumentException($"Value exceeds maximum allowed length of {maxLen} size.", nameof(name));
+                throw new ArgumentException($"Value exceeds maximum allowed length of {MaxLen} size.", nameof(name));
             }
 
-            InterfaceIndexQuery ifr = new InterfaceIndexQuery();
-            fixed (char* inInterfaceName = name)
+            ifreq ifr = new ifreq();
+            fixed (char* inIntefaceName = name)
             {
-                int written = Encoding.ASCII.GetBytes(inInterfaceName, name.Length, ifr.ifr_name, maxLen);
+                int written = Encoding.ASCII.GetBytes(inIntefaceName, name.Length, ifr.ifr_name, MaxLen);
                 ifr.ifr_name[written] = 0;
             }
 
@@ -149,7 +149,7 @@ namespace Iot.Device.SocketCan
             return ifr.ifr_ifindex;
         }
 
-        internal unsafe struct InterfaceIndexQuery
+        internal unsafe struct ifreq
         {
             internal const int IFNAMSIZ = 16;
             public fixed byte ifr_name[IFNAMSIZ];

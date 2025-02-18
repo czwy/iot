@@ -55,17 +55,5 @@ namespace ArduinoCsCompiler.Runtime
         {
             throw new NotImplementedException();
         }
-
-        [ArduinoImplementation]
-        public static void MemoryBarrier()
-        {
-            // Nothing to do here
-        }
-
-        [ArduinoImplementation]
-        public static void ReadMemoryBarrier()
-        {
-            // Nothing to do here
-        }
     }
 }

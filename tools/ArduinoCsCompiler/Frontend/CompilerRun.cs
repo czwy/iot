@@ -59,6 +59,7 @@ namespace ArduinoCsCompiler
 
                 if (!_compiler.QueryBoardCapabilities(true, out var caps))
                 {
+                    Logger.LogError("Couldn't query board capabilities. Possibly incompatible firmware");
                     return false;
                 }
 
@@ -162,16 +163,10 @@ namespace ArduinoCsCompiler
 
             if (!CommandLineOptions.CompileOnly)
             {
-                try
-                {
-                    set.Load(false);
-                }
-                finally
-                {
-                    // Call this after load, so we have an updated flash usage value available.
-                    // But also call it if load fails (e.g. due to not enough flash memory)
-                    WriteTokenMap(set);
-                }
+                set.Load(false);
+
+                // Call this after load, so we have an updated flash usage value available.
+                WriteTokenMap(set);
 
                 if (CommandLineOptions.Run == false)
                 {

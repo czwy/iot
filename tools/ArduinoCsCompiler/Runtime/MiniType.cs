@@ -63,24 +63,6 @@ namespace ArduinoCsCompiler.Runtime
             }
         }
 
-        /// <summary>
-        /// This could probably be implemented as auto property, but we'd rather save the memory and avoid the cache.
-        /// </summary>
-        public object? GenericCache
-        {
-            [ArduinoImplementation]
-            get
-            {
-                return null;
-            }
-
-            [ArduinoImplementation]
-            set
-            {
-                // Nothing to do.
-            }
-        }
-
         public Assembly? Assembly
         {
             get
@@ -259,12 +241,6 @@ namespace ArduinoCsCompiler.Runtime
             throw new NotImplementedException();
         }
 
-        [ArduinoImplementation]
-        public virtual bool Equals(Type other)
-        {
-            return Equals((object)other);
-        }
-
         [ArduinoImplementation("TypeGetHashCode", 0x5B)]
         public override int GetHashCode()
         {
@@ -370,14 +346,14 @@ namespace ArduinoCsCompiler.Runtime
             }
 
             // Get all of the values
-            Array values = MiniEnum.GetValues(this);
+            ulong[] values = MiniEnum.InternalGetValues(this);
 
             // Create a generic Array
             Array ret = Array.CreateInstance(MiniUnsafe.As<Type>(this), values.Length);
 
             for (int i = 0; i < values.Length; i++)
             {
-                object val = Enum.ToObject(MiniUnsafe.As<Type>(this), values.GetValue(i)!);
+                object val = Enum.ToObject(MiniUnsafe.As<Type>(this), values[i]);
                 ret.SetValue(val, i);
             }
 
